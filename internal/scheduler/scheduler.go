@@ -34,8 +34,9 @@ type workerRecord struct {
 }
 
 // Scheduler finds an available worker, reserves it, dispatches the task,
-// retries on failure and monitors health. Phase 1 tracks a single worker;
-// the bookkeeping mirrors what the distributed scheduler enforces in Phase 4.
+// retries on failure and monitors health. Workers are stateless, so the pool
+// is modelled as a set of execution slots; Phase 4 replaces the in-process
+// slots with a NATS-backed pool of remote workers.
 type Scheduler struct {
 	bus       events.EventBus
 	logger    *slog.Logger
@@ -45,12 +46,17 @@ type Scheduler struct {
 	currentID string
 }
 
-func NewScheduler(bus events.EventBus, worker Worker, logger *slog.Logger) *Scheduler {
+func NewScheduler(bus events.EventBus, worker Worker, logger *slog.Logger, size int) *Scheduler {
+	if size <= 0 {
+		size = 1
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
 	s := &Scheduler{bus: bus, logger: logger, worker: worker, workers: map[string]*workerRecord{}}
-	s.registerWorker("worker-1")
+	for i := 1; i <= size; i++ {
+		s.registerWorker(fmt.Sprintf("worker-%d", i))
+	}
 	return s
 }
 

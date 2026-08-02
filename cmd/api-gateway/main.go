@@ -153,9 +153,9 @@ func wire(ctx context.Context, cfg config.Config, st *store.Store, bus events.Ev
 		UseSemantic:   useSemantic,
 	}, provider, model, toolRegistry, taskTemplates, ctxbuilder.New(), arts, bus, logger)
 
-	sched := scheduler.NewScheduler(bus, w, logger)
+	sched := scheduler.NewScheduler(bus, w, logger, cfg.EngineConcurrency)
 	compiler := workflow.NewCompiler(taskTemplates)
-	engine := workflow.NewEngine(st.Tasks, bus, logger, 1)
+	engine := workflow.NewEngine(st.Tasks, bus, logger, cfg.EngineConcurrency)
 	return agents.NewAgentService(st, bus, agentTemplates, plannerIf, compiler, engine, sched, logger)
 }
 

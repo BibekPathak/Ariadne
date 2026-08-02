@@ -46,9 +46,23 @@ echo ""
 echo "==> task graph (compiled DAG)"
 curl -s $BASE/agents/$AGENT_ID/graph | python3 -c '
 import sys, json
-for t in json.load(sys.stdin)["tasks"]:
-    deps = ",".join(d.split("_")[-1] for d in t["depends_on"]) or "-"
-    print("  %-10s status=%-8s template=%-10s attempt=%d/%d depends_on=%s" % (t["name"], t["status"], t["template"], t["attempt"], t["max_attempt"], deps))'
+tasks = json.load(sys.stdin)["tasks"]
+by = {t["name"]: t for t in tasks}
+print("  %-10s status" % "task")
+for t in tasks:
+    deps = ",".join(by[d.split("_")[-1]]["name"] for d in t["depends_on"] if d.split("_")[-1] in by) or "-"
+    arrow = ""
+    if deps != "-":
+        arrow = " <- " + deps
+    print("  %-10s %-8s %s%s" % (t["name"], t["status"], t["template"], arrow))
+# Detect parallel branches: nodes with the same dependency set.
+from collections import defaultdict
+groups = defaultdict(list)
+for t in tasks:
+    groups[tuple(sorted(d.split("_")[-1] for d in t["depends_on"]))].append(t["name"])
+parallel = [g for g in groups.values() if len(g) > 1]
+if parallel:
+    print("  parallel branches: " + " ∥ ".join("{" + ",".join(g) + "}" for g in parallel))'
 
 echo ""
 echo "==> event timeline (event-sourced replay)"
@@ -58,7 +72,8 @@ for e in json.load(sys.stdin)["events"]:
     task = e.get("task_id","")
     if task:
         task = "[" + task.split("_")[-1] + "] "
-    print("  %-4s %s%s" % (e["seq"], task, e["type"]))'
+    ts = e["ts"][11:19]
+    print("  %s %-4s %s%s" % (ts, e["seq"], task, e["type"]))'
 
 echo ""
 echo "==> artifacts"

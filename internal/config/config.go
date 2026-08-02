@@ -26,11 +26,12 @@ type Config struct {
 	SandboxMemMB   int
 	SandboxNetwork string
 
-	ArtifactsDir  string
-	RepoBaseDir   string
-	DemoRepoPath  string
-	MaxIterations int
-	Timeout       time.Duration
+	ArtifactsDir      string
+	RepoBaseDir       string
+	DemoRepoPath      string
+	MaxIterations     int
+	Timeout           time.Duration
+	EngineConcurrency int
 }
 
 func Load() Config {
@@ -44,18 +45,19 @@ func Load() Config {
 
 		RedisAddr: get("REDIS_ADDR", "localhost:6379"),
 
-		MemoryEnabled:   getBool("MEMORY_ENABLED", true),
-		MemoryShortTTL:  time.Duration(getInt("MEMORY_SHORT_TTL_MIN", 60)) * time.Minute,
-		MemoryVectorDir: get("MEMORY_VECTOR_DIR", "./data/memory"),
-		SandboxImage:    get("SANDBOX_IMAGE", "kubeai-sandbox:local"),
-		SandboxCPU:      get("SANDBOX_CPU", "1"),
-		SandboxMemMB:    getInt("SANDBOX_MEM_MB", 1024),
-		SandboxNetwork:  get("SANDBOX_NETWORK", "none"),
-		ArtifactsDir:    get("ARTIFACTS_DIR", "./artifacts"),
-		RepoBaseDir:     get("REPO_BASE_DIR", "/tmp/kubeai-repos"),
-		DemoRepoPath:    get("DEMO_REPO_PATH", "./demo/repo"),
-		MaxIterations:   getInt("MAX_ITERATIONS", 25),
-		Timeout:         time.Duration(getInt("AGENT_TIMEOUT_MIN", 30)) * time.Minute,
+		MemoryEnabled:     getBool("MEMORY_ENABLED", true),
+		MemoryShortTTL:    time.Duration(getInt("MEMORY_SHORT_TTL_MIN", 60)) * time.Minute,
+		MemoryVectorDir:   get("MEMORY_VECTOR_DIR", "./data/memory"),
+		SandboxImage:      get("SANDBOX_IMAGE", "kubeai-sandbox:local"),
+		SandboxCPU:        get("SANDBOX_CPU", "1"),
+		SandboxMemMB:      getInt("SANDBOX_MEM_MB", 1024),
+		SandboxNetwork:    get("SANDBOX_NETWORK", "none"),
+		ArtifactsDir:      get("ARTIFACTS_DIR", "./artifacts"),
+		RepoBaseDir:       get("REPO_BASE_DIR", "/tmp/kubeai-repos"),
+		DemoRepoPath:      get("DEMO_REPO_PATH", "./demo/repo"),
+		MaxIterations:     getInt("MAX_ITERATIONS", 25),
+		Timeout:           time.Duration(getInt("AGENT_TIMEOUT_MIN", 30)) * time.Minute,
+		EngineConcurrency: getInt("ENGINE_CONCURRENCY", 4),
 	}
 }
 

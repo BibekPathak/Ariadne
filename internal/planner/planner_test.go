@@ -38,10 +38,25 @@ func TestStaticPlanner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Tasks) != 3 {
-		t.Fatalf("expected 3 tasks, got %d", len(plan.Tasks))
+	if len(plan.Tasks) != 4 {
+		t.Fatalf("expected 4 tasks, got %d", len(plan.Tasks))
 	}
-	if plan.Tasks[0].Template != "analyze" || plan.Tasks[1].Template != "implement" || plan.Tasks[2].Template != "test" {
-		t.Fatalf("unexpected static plan %+v", plan.Tasks)
+	if plan.Tasks[0].Template != "analyze" {
+		t.Fatalf("expected analyze first, got %+v", plan.Tasks[0])
+	}
+	// implement and docs must both depend only on analyze (parallel branches).
+	if len(plan.Tasks[1].DependsOn) != 1 || plan.Tasks[1].DependsOn[0] != "analyze" {
+		t.Fatalf("implement should depend only on analyze, got %v", plan.Tasks[1].DependsOn)
+	}
+	if len(plan.Tasks[2].DependsOn) != 1 || plan.Tasks[2].DependsOn[0] != "analyze" {
+		t.Fatalf("docs should depend only on analyze, got %v", plan.Tasks[2].DependsOn)
+	}
+	// test merges both branches.
+	got := map[string]bool{}
+	for _, d := range plan.Tasks[3].DependsOn {
+		got[d] = true
+	}
+	if !got["implement"] || !got["docs"] {
+		t.Fatalf("test should merge implement and docs, got %v", plan.Tasks[3].DependsOn)
 	}
 }

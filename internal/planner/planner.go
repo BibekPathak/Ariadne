@@ -105,7 +105,8 @@ func extractJSON(s string) string {
 }
 
 // StaticPlanner is the deterministic fallback used when no LLM key is
-// configured: it always emits the coder pipeline analyze -> implement ->
+// configured. It emits the coder pipeline as a real branching DAG so the
+// offline demo exercises parallel execution: analyze -> {implement, docs} ->
 // test. It keeps the whole system runnable offline.
 type StaticPlanner struct{}
 
@@ -117,6 +118,7 @@ func (StaticPlanner) Plan(ctx context.Context, req PlanRequest) (*ExecutionPlan,
 	return &ExecutionPlan{Tasks: []PlanItem{
 		{Name: "analyze", Template: "analyze", Inputs: repo},
 		{Name: "implement", Template: "implement", Inputs: repo, DependsOn: []string{"analyze"}},
-		{Name: "test", Template: "test", Inputs: repo, DependsOn: []string{"implement"}},
+		{Name: "docs", Template: "docs", Inputs: repo, DependsOn: []string{"analyze"}},
+		{Name: "test", Template: "test", Inputs: repo, DependsOn: []string{"implement", "docs"}},
 	}}, nil
 }

@@ -40,7 +40,7 @@ func defaultTemplates() map[string]AgentTemplate {
 			AllowedTools: []string{"list_files", "read_file", "write_file", "shell", "git"},
 			Sandbox:      SandboxPolicy{CPU: "1", MemMB: 1024, Image: "ubuntu:22.04"},
 			Memory:       MemoryPolicy{UseShortTerm: true},
-			DefaultPlan:  []string{"analyze", "implement", "test"},
+			DefaultPlan:  []string{"analyze", "implement", "docs", "test"},
 		},
 		"researcher": {
 			Name:          "researcher",

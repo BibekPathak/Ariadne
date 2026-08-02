@@ -46,6 +46,12 @@ func (p DemoProvider) Generate(ctx context.Context, req Request) (*Response, err
 			{ID: "call_writetest", Function: Function{Name: "write_file", Arguments: `{"path":"mathx/mathx_test.go","content":"package mathx\n\nimport \"testing\"\n\nfunc TestAdd(t *testing.T) {\n\tif got := Add(2, 3); got != 5 {\n\t\tt.Fatalf(\"Add(2,3) = %d, want 5\", got)\n\t}\n}\n\nfunc TestSubtract(t *testing.T) {\n\tif got := Subtract(5, 3); got != 2 {\n\t\tt.Fatalf(\"Subtract(5,3) = %d, want 2\", got)\n\t}\n}\n"}`}},
 			{ID: "call_build", Function: Function{Name: "shell", Arguments: `{"command":"cd /repo && go build ./... 2>&1"}`}},
 		}}, nil
+	case strings.Contains(task, "README") || strings.Contains(task, "documentation"):
+		// docs template: write a README describing the project.
+		return &Response{ToolCalls: []ToolCall{{
+			ID:       "call_docs",
+			Function: Function{Name: "write_file", Arguments: `{"path":"README.md","content":"# demoproj\n\nA tiny Go project used to demonstrate the Adriane agent platform.\n\nThe mathx package provides arithmetic helpers: Add and Subtract.\n"}`},
+		}}}, nil
 	case strings.Contains(task, "Analyze") || strings.Contains(task, "analyze"):
 		// analyze template: report the inspection, echoing any recollection the
 		// context builder retrieved from memory. This is how the offline demo

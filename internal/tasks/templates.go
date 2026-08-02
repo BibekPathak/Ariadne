@@ -43,6 +43,14 @@ var defaultTemplates = map[string]Template{
 		Timeout:      10 * time.Minute,
 		Retries:      2,
 	},
+	"docs": {
+		Name:         "docs",
+		Description:  "Create or update project documentation.",
+		Prompt:       "Update the project documentation to reflect the current state. Create or edit README.md with a concise project description.",
+		AllowedTools: []string{"read_file", "write_file", "list_files", "shell"},
+		Timeout:      5 * time.Minute,
+		Retries:      1,
+	},
 	"review": {
 		Name:         "review",
 		Description:  "Review the changes made against the goal.",

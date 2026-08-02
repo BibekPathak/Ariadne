@@ -71,8 +71,24 @@ func (e *Engine) Run(ctx context.Context, dag *DAG, executor TaskExecutor) error
 		wg.Wait()
 	}
 	dag.Blocked()
+	if err := e.persistBlocked(ctx, dag); err != nil {
+		return err
+	}
 	if dag.AnyFailed() {
 		return fmt.Errorf("workflow failed: one or more tasks could not complete")
+	}
+	return nil
+}
+
+// persistBlocked writes blocked status for nodes that could not run because a
+// dependency failed.
+func (e *Engine) persistBlocked(ctx context.Context, dag *DAG) error {
+	for _, n := range dag.Nodes {
+		if n.Status == StatusBlocked {
+			if err := e.store.UpdateStatus(ctx, n.ID, string(StatusBlocked), "dependency failed"); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

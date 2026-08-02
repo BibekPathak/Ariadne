@@ -4,11 +4,11 @@ Kubernetes for AI agents: a distributed execution platform where agents are
 created, planned, scheduled, executed in isolated sandboxes, and replayable
 from an event-sourced log.
 
-This is **Phase 0-2** of a ten-phase roadmap: a single-agent, single-worker
-system with persistent three-tier memory and a ranked/compressed context
-builder, architected so the remaining phases (distributed workers over NATS,
-Firecracker, model router, evaluation, observability, production features)
-slot in behind existing interfaces.
+This is **Phase 0-3** of a ten-phase roadmap: a single-agent, single-worker
+platform with persistent three-tier memory, a ranked/compressed context
+builder, and parallel DAG execution — architected so the remaining phases
+(distributed workers over NATS, Firecracker, model router, evaluation,
+observability, production features) slot in behind existing interfaces.
 
 ## Architecture
 
@@ -58,10 +58,11 @@ make demo                     # build, migrate, run agent, show results
 make demo-memory              # two runs: proves memory persists across runs
 ```
 
-The demo creates a `coder` agent against `./demo/repo`, which plans
-(`analyze → implement → test`), adds a `Subtract` function and its test via
-the sandbox, runs `go test ./...`, and writes everything as artifacts and
-events.
+The demo creates a `coder` agent against `./demo/repo`, which plans a
+branching DAG (`analyze → {implement ∥ docs} → test`), runs the parallel
+branches in isolated sandboxes concurrently, adds a `Subtract` function and
+its test, writes a README, runs `go test ./...`, and writes everything as
+artifacts and events. `ENGINE_CONCURRENCY` controls branch parallelism.
 
 `make demo-memory` demonstrates persistent memory across runs: run 1 stores
 per-task outcomes in short-term (Redis), long-term (Postgres) and semantic
@@ -133,7 +134,7 @@ demo/repo              sample project used by `make demo`
 
 ## Roadmap
 
-Phase 3 parallel DAGs · Phase 4 distributed workers over NATS · Phase 5
-checkpointing & hardened sandbox · Phase 6 Firecracker + Qdrant · Phase 7
-model router · Phase 8 evaluation · Phase 9 observability + execution graph
-UI · Phase 10 production features.
+Phase 4 distributed workers over NATS · Phase 5 checkpointing & hardened
+sandbox · Phase 6 Firecracker + Qdrant · Phase 7 model router · Phase 8
+evaluation · Phase 9 observability + execution graph UI · Phase 10 production
+features.
