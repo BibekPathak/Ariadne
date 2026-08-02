@@ -4,11 +4,12 @@ Kubernetes for AI agents: a distributed execution platform where agents are
 created, planned, scheduled, executed in isolated sandboxes, and replayable
 from an event-sourced log.
 
-This is **Phase 0-3** of a ten-phase roadmap: a single-agent, single-worker
-platform with persistent three-tier memory, a ranked/compressed context
-builder, and parallel DAG execution — architected so the remaining phases
-(distributed workers over NATS, Firecracker, model router, evaluation,
-observability, production features) slot in behind existing interfaces.
+This is **Phase 0-4** of a ten-phase roadmap: a distributed platform with
+persistent three-tier memory, a ranked/compressed context builder, parallel
+DAG execution, and **remote workers over NATS** with dead-worker reassignment —
+architected so the remaining phases (checkpointing, Firecracker, model router,
+evaluation, observability, production features) slot in behind existing
+interfaces.
 
 ## Architecture
 
@@ -32,13 +33,13 @@ observability, production features) slot in behind existing interfaces.
 
 Key seams (each maps to a later phase):
 
-| Interface | Phase 2 impl | Later impl |
+| Interface | Current impl | Later impl |
 |---|---|---|
-| `events.EventBus` | in-memory + Postgres append | NATS JetStream (Phase 4) |
+| `events.EventBus` | in-memory + Postgres append; NATS JetStream in remote mode | — |
 | `sandbox.Sandbox` | Docker | Firecracker (Phase 6) |
 | `llm.Provider` | Requesty / demo provider | model router (Phase 7) |
 | `memory.Memory` | Redis + Postgres + Go-native vectors | Qdrant (Phase 6) |
-| `workflow.Compiler` | plan → DAG | richer plans (Phase 3) |
+| `workflow.Compiler` | plan → DAG | richer plans (Phase 3+) |
 
 ## Prerequisites
 
@@ -52,11 +53,23 @@ No API key required — the demo provider drives the real tool pipeline inside a
 real Docker sandbox.
 
 ```bash
-docker compose up -d          # postgres + redis
+docker compose up -d          # postgres + redis + nats
 make sandbox-image            # kubeai-sandbox:local
-make demo                     # build, migrate, run agent, show results
+make demo                     # embedded mode: single process, one agent run
 make demo-memory              # two runs: proves memory persists across runs
+make demo-distributed         # 3 remote workers over NATS; kills one mid-run
+                              # and shows the task being reassigned
 ```
+
+## Modes
+
+- **`WORKER_MODE=embedded`** (default): the scheduler dispatches to an
+  in-process worker. Single binary — the fastest developer loop.
+- **`WORKER_MODE=remote`**: the control plane (`cmd/api-gateway`) and workers
+  (`cmd/worker`) are separate processes joined by NATS. Task dispatch,
+  results, claims, heartbeats and events flow over JSON on NATS subjects; the
+  control plane persists events to Postgres for replay. Workers that stop
+  heartbeating are marked dead and their in-flight tasks are reassigned.
 
 The demo creates a `coder` agent against `./demo/repo`, which plans a
 branching DAG (`analyze → {implement ∥ docs} → test`), runs the parallel
@@ -115,26 +128,28 @@ make migrate     # apply schema migrations
 ## Layout
 
 ```
-cmd/api-gateway        REST + SSE server; wires the in-process control plane
+cmd/api-gateway        control plane: REST + SSE, scheduler, workflow engine
+cmd/worker             standalone worker: claims NATS tasks, runs agent loop
 internal/agents        agent templates + lifecycle orchestration
 internal/planner       goal → execution plan (LLM or static fallback)
 internal/workflow      compiler (plan → DAG) + DAG engine
-internal/scheduler     dispatch, worker lifecycle, retries
+internal/scheduler     dispatch (embedded or NATS remote), retries, dead-worker detection
+internal/transport     stable NATS wire contract: TaskMessage/Result/Heartbeat
 internal/worker        agent loop: sandbox → LLM → tools → artifacts → memory
 internal/sandbox       Sandbox interface + Docker implementation
 internal/tools         tool registry: read/write/shell/git/http
 internal/context       context builder: rank → compress → token budget
 internal/llm           Provider interface: Requesty + demo provider + embeddings
 internal/memory        three-tier memory: Redis (short), Postgres (long), vectors (semantic)
-internal/events        event bus + event schema (event sourcing)
+internal/events        event bus: in-memory + NATS JetStream
 internal/store         postgres repositories + migrations
 internal/artifacts     first-class artifact store
-demo/repo              sample project used by `make demo`
+internal/runtime       shared worker-stack construction for both binaries
+demo/repo              sample project used by the demos
 ```
 
 ## Roadmap
 
-Phase 4 distributed workers over NATS · Phase 5 checkpointing & hardened
-sandbox · Phase 6 Firecracker + Qdrant · Phase 7 model router · Phase 8
-evaluation · Phase 9 observability + execution graph UI · Phase 10 production
-features.
+Phase 5 checkpointing & hardened sandbox · Phase 6 Firecracker + Qdrant ·
+Phase 7 model router · Phase 8 evaluation · Phase 9 observability + execution
+graph UI · Phase 10 production features.

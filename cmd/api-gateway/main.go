@@ -10,19 +10,12 @@ import (
 	"time"
 
 	"adriane/internal/agents"
-	"adriane/internal/artifacts"
 	"adriane/internal/config"
-	ctxbuilder "adriane/internal/context"
 	"adriane/internal/events"
-	"adriane/internal/llm"
-	"adriane/internal/memory"
 	"adriane/internal/planner"
-	"adriane/internal/sandbox"
+	"adriane/internal/runtime"
 	"adriane/internal/scheduler"
 	"adriane/internal/store"
-	"adriane/internal/tasks"
-	"adriane/internal/tools"
-	"adriane/internal/worker"
 	"adriane/internal/workflow"
 )
 
@@ -54,6 +47,24 @@ func main() {
 	})
 	defer bus.Close()
 
+	// Remote mode: workers publish events over NATS; forward them into the
+	// local bus so they are persisted and streamed to SSE like local events.
+	if cfg.WorkerMode == "remote" {
+		remoteBus, err := events.NewNATSBus(cfg.NATSURL)
+		if err != nil {
+			logger.Error("connect to nats", "err", err)
+			os.Exit(1)
+		}
+		defer remoteBus.Close()
+		go func() {
+			if err := remoteBus.Forward(ctx, func(e events.Event) error {
+				return bus.Publish(ctx, e)
+			}); err != nil && ctx.Err() == nil {
+				logger.Error("nats event forwarder stopped", "err", err)
+			}
+		}()
+	}
+
 	service := wire(ctx, cfg, st, bus, logger)
 
 	srv := &http.Server{
@@ -61,100 +72,44 @@ func main() {
 		Handler:           routes(service, bus, cfg.Timeout, logger),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	logger.Info("control plane listening", "addr", cfg.HTTPAddr)
+	logger.Info("control plane listening", "addr", cfg.HTTPAddr, "worker_mode", cfg.WorkerMode)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("server error", "err", err)
 		os.Exit(1)
 	}
 }
 
-// wire assembles the Phase 1 control plane in-process. This is the exact
-// seam that Phase 4 splits across processes: bus becomes NATS, worker becomes
-// a remote executor.
+// wire assembles the control plane. In embedded mode the scheduler dispatches
+// to an in-process worker; in remote mode it dispatches over NATS to a pool of
+// standalone workers.
 func wire(ctx context.Context, cfg config.Config, st *store.Store, bus events.EventBus, logger *slog.Logger) *agents.AgentService {
-	arts, err := artifacts.New(cfg.ArtifactsDir, st.Artifacts)
+	stack, err := runtime.Build(cfg, st, bus, logger)
 	if err != nil {
-		logger.Error("init artifact store", "err", err)
+		logger.Error("build runtime", "err", err)
 		os.Exit(1)
 	}
 
-	var provider llm.Provider
-	var model string
-	if cfg.RequestyAPIKey == "" {
-		provider = llm.DemoProvider{}
-		logger.Warn("no REQUESTY_API_KEY set; using demo provider (offline mode)")
-	} else {
-		provider = llm.NewOpenAICompatible(llm.Config{
-			Name: "requesty", BaseURL: cfg.RequestyBase, APIKey: cfg.RequestyAPIKey,
-			Model: cfg.LLMModel, EmbeddingModel: cfg.EmbeddingModel,
-		})
-		model = cfg.LLMModel
-	}
-
-	toolRegistry := tools.NewRegistry(
-		tools.ReadFileTool{}, tools.WriteFileTool{}, tools.ListFilesTool{},
-		tools.ShellTool{}, tools.GitTool{}, tools.HTTPGetTool{},
-	)
-	taskTemplates := tasks.NewRegistry()
 	agentTemplates := agents.NewTemplateRegistry()
 
 	var plannerIf planner.Planner
 	if cfg.RequestyAPIKey == "" {
 		plannerIf = planner.StaticPlanner{}
 	} else {
-		plannerIf = planner.NewLLMPlanner(provider, taskTemplates, model)
+		plannerIf = planner.NewLLMPlanner(stack.Provider, stack.TaskTemplates, stack.Model)
 	}
 
-	sbox := sandbox.NewDockerSandbox(sandbox.DockerConfig{
-		Image:   cfg.SandboxImage,
-		CPU:     cfg.SandboxCPU,
-		MemMB:   cfg.SandboxMemMB,
-		Network: cfg.SandboxNetwork,
-		BaseDir: cfg.RepoBaseDir,
-	})
-
-	// Memory tier (Phase 2): short-term in Redis, long-term in Postgres,
-	// semantic in a Go-native vector store. Disabled when MEMORY_ENABLED=false.
-	var mem memory.Memory
-	useSemantic := false
-	if cfg.MemoryEnabled {
-		short, err := memory.NewShortTermRedis(cfg.RedisAddr, cfg.MemoryShortTTL)
+	var workerIf scheduler.Worker = stack.Worker
+	if cfg.WorkerMode == "remote" {
+		dispatcher, err := scheduler.NewRemoteDispatcher(cfg.NATSURL, cfg.Timeout, logger)
 		if err != nil {
-			logger.Warn("memory short-term disabled", "err", err)
-		} else {
-			vec, err := memory.NewVectorStore(cfg.MemoryVectorDir)
-			if err != nil {
-				logger.Warn("memory semantic disabled", "err", err)
-				_ = short.Close()
-			} else {
-				m, err := memory.NewManager(memory.ManagerConfig{
-					ShortTerm: short,
-					LongTerm:  memory.NewLongTermPostgres(st.Memories),
-					Semantic:  vec,
-					Embedder:  provider,
-					Logger:    logger,
-				})
-				if err != nil {
-					logger.Warn("memory manager disabled", "err", err)
-					_ = short.Close()
-				} else {
-					mem = m
-					useSemantic = true
-				}
-			}
+			logger.Error("init remote dispatcher", "err", err)
+			os.Exit(1)
 		}
+		workerIf = dispatcher
 	}
 
-	w := worker.New(worker.Config{
-		MaxIterations: cfg.MaxIterations,
-		RepoBaseDir:   cfg.RepoBaseDir,
-		Sandbox:       sbox,
-		Memory:        mem,
-		UseSemantic:   useSemantic,
-	}, provider, model, toolRegistry, taskTemplates, ctxbuilder.New(), arts, bus, logger)
-
-	sched := scheduler.NewScheduler(bus, w, logger, cfg.EngineConcurrency)
-	compiler := workflow.NewCompiler(taskTemplates)
+	sched := scheduler.NewScheduler(bus, workerIf, logger, cfg.EngineConcurrency)
+	compiler := workflow.NewCompiler(stack.TaskTemplates)
 	engine := workflow.NewEngine(st.Tasks, bus, logger, cfg.EngineConcurrency)
 	return agents.NewAgentService(st, bus, agentTemplates, plannerIf, compiler, engine, sched, logger)
 }

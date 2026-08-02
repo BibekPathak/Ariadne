@@ -21,6 +21,9 @@ type Config struct {
 	MemoryShortTTL  time.Duration
 	MemoryVectorDir string
 
+	WorkerMode string // "embedded" or "remote"
+	NATSURL    string
+
 	SandboxImage   string
 	SandboxCPU     string
 	SandboxMemMB   int
@@ -45,9 +48,12 @@ func Load() Config {
 
 		RedisAddr: get("REDIS_ADDR", "localhost:6379"),
 
-		MemoryEnabled:     getBool("MEMORY_ENABLED", true),
-		MemoryShortTTL:    time.Duration(getInt("MEMORY_SHORT_TTL_MIN", 60)) * time.Minute,
-		MemoryVectorDir:   get("MEMORY_VECTOR_DIR", "./data/memory"),
+		MemoryEnabled:   getBool("MEMORY_ENABLED", true),
+		MemoryShortTTL:  time.Duration(getInt("MEMORY_SHORT_TTL_MIN", 60)) * time.Minute,
+		MemoryVectorDir: get("MEMORY_VECTOR_DIR", "./data/memory"),
+
+		WorkerMode:        get("WORKER_MODE", "embedded"),
+		NATSURL:           get("NATS_URL", "nats://localhost:4222"),
 		SandboxImage:      get("SANDBOX_IMAGE", "kubeai-sandbox:local"),
 		SandboxCPU:        get("SANDBOX_CPU", "1"),
 		SandboxMemMB:      getInt("SANDBOX_MEM_MB", 1024),

@@ -43,10 +43,16 @@ func New(agentID, taskID string, t Type, payload map[string]any) Event {
 	}
 }
 
-// EventBus is the event-sourcing seam. Phase 4 swaps the in-memory
-// implementation for NATS JetStream without touching callers.
-type EventBus interface {
+// Publisher is the minimal event output a component needs. Workers and the
+// control plane both publish; only the control plane subscribes.
+type Publisher interface {
 	Publish(ctx context.Context, e Event) error
+}
+
+// EventBus is the event-sourcing seam. Phase 4 adds a NATS JetStream
+// implementation for the distributed data plane.
+type EventBus interface {
+	Publisher
 	// Subscribe returns a receive-only channel and a cancel function.
 	Subscribe() (<-chan Event, func())
 	Close() error

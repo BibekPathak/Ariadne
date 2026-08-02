@@ -41,7 +41,7 @@ type Worker struct {
 	templates   *tasks.Registry
 	context     *ctxbuilder.Builder
 	artifacts   *artifacts.Store
-	bus         events.EventBus
+	bus         events.Publisher
 	logger      *slog.Logger
 	memory      memory.Memory
 	useSemantic bool
@@ -49,7 +49,7 @@ type Worker struct {
 
 func New(cfg Config, provider llm.Provider, model string, registry *tools.Registry,
 	templates *tasks.Registry, ctxBuilder *ctxbuilder.Builder, arts *artifacts.Store,
-	bus events.EventBus, logger *slog.Logger) *Worker {
+	bus events.Publisher, logger *slog.Logger) *Worker {
 	if cfg.MaxIterations <= 0 {
 		cfg.MaxIterations = 25
 	}

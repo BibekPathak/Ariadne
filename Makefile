@@ -1,7 +1,8 @@
-.PHONY: run test demo demo-memory migrate lint tidy build sandbox-image
+.PHONY: run test demo demo-memory demo-distributed migrate lint tidy build sandbox-image
 
 build:
 	go build -o bin/kubeai ./cmd/api-gateway
+	go build -o bin/kubeai-worker ./cmd/worker
 
 sandbox-image:
 	docker build -t kubeai-sandbox:local -f deploy/sandbox.Dockerfile .
@@ -26,6 +27,9 @@ demo: up build
 
 demo-memory: up build
 	./scripts/demo-memory.sh
+
+demo-distributed: up build
+	./scripts/demo-distributed.sh
 
 lint:
 	go vet ./...
