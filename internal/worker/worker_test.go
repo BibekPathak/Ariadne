@@ -7,14 +7,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"kubeai/internal/artifacts"
-	ctxbuilder "kubeai/internal/context"
-	"kubeai/internal/events"
-	"kubeai/internal/llm"
-	"kubeai/internal/sandbox"
-	"kubeai/internal/tasks"
-	"kubeai/internal/tools"
-	"kubeai/internal/workflow"
+	"adriane/internal/artifacts"
+	ctxbuilder "adriane/internal/context"
+	"adriane/internal/events"
+	"adriane/internal/llm"
+	"adriane/internal/sandbox"
+	"adriane/internal/tasks"
+	"adriane/internal/tools"
+	"adriane/internal/workflow"
 )
 
 func TestWorkerAgentLoopEndToEnd(t *testing.T) {

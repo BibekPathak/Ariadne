@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"kubeai/internal/events"
+	"adriane/internal/events"
 )
 
 type EventsRepo struct {

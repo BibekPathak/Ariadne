@@ -6,8 +6,8 @@ import (
 	"sort"
 	"sync"
 
-	"kubeai/internal/llm"
-	"kubeai/internal/sandbox"
+	"adriane/internal/llm"
+	"adriane/internal/sandbox"
 )
 
 // ExecContext is what a tool needs to operate: an isolated session plus the

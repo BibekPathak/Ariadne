@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"kubeai/internal/events"
-	"kubeai/internal/workflow"
+	"adriane/internal/events"
+	"adriane/internal/workflow"
 )
 
 type fakeWorker struct {

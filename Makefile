@@ -1,4 +1,4 @@
-.PHONY: run test demo migrate lint tidy build sandbox-image
+.PHONY: run test demo demo-memory migrate lint tidy build sandbox-image
 
 build:
 	go build -o bin/kubeai ./cmd/api-gateway
@@ -23,6 +23,9 @@ down:
 
 demo: up build
 	./scripts/demo.sh
+
+demo-memory: up build
+	./scripts/demo-memory.sh
 
 lint:
 	go vet ./...

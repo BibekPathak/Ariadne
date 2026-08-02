@@ -16,6 +16,7 @@ type Store struct {
 	Tasks     *TasksRepo
 	Events    *EventsRepo
 	Artifacts *ArtifactsRepo
+	Memories  *MemoryRepo
 }
 
 func New(ctx context.Context, databaseURL string) (*Store, error) {
@@ -31,6 +32,7 @@ func New(ctx context.Context, databaseURL string) (*Store, error) {
 	s.Tasks = &TasksRepo{pool: pool}
 	s.Events = &EventsRepo{pool: pool}
 	s.Artifacts = &ArtifactsRepo{pool: pool}
+	s.Memories = &MemoryRepo{pool: pool}
 	return s, nil
 }
 

@@ -12,3 +12,9 @@ func newID() string {
 	ts := time.Now().UTC().Format("20060102T150405")
 	return ts + "_" + hex.EncodeToString(b)
 }
+
+func newRunID() string {
+	b := make([]byte, 4)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}

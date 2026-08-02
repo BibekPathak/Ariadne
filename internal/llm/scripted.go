@@ -25,6 +25,10 @@ func NewScriptedProvider(name string, responses ...Response) *ScriptedProvider {
 
 func (p *ScriptedProvider) Name() string { return p.name }
 
+func (p *ScriptedProvider) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	return DeterministicEmbed(texts), nil
+}
+
 func (p *ScriptedProvider) Generate(ctx context.Context, req Request) (*Response, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

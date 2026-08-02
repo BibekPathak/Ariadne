@@ -3,11 +3,11 @@ package workflow
 import (
 	"fmt"
 
-	"kubeai/internal/planner"
-	"kubeai/internal/tasks"
+	"adriane/internal/planner"
+	"adriane/internal/tasks"
 )
 
-// Compiler is the deterministic bridge between the AI Planner and the DAG
+// Compile is the deterministic bridge between the AI Planner and the DAG
 // engine. It validates template references, resolves named dependencies and
 // assigns concrete node IDs. Being pure, it is trivially testable.
 type Compiler struct {
@@ -18,7 +18,10 @@ func NewCompiler(registry *tasks.Registry) *Compiler {
 	return &Compiler{registry: registry}
 }
 
-func (c *Compiler) Compile(agentID string, plan *planner.ExecutionPlan) (*DAG, error) {
+// Compile materialises the plan into a DAG. agentID is the stable agent
+// identity (used for memory and events); runID disambiguates task IDs across
+// re-runs of the same agent, so runs never collide.
+func (c *Compiler) Compile(agentID, runID string, plan *planner.ExecutionPlan) (*DAG, error) {
 	dag := &DAG{AgentID: agentID}
 
 	// First pass: materialise nodes, validate templates.
@@ -29,7 +32,7 @@ func (c *Compiler) Compile(agentID string, plan *planner.ExecutionPlan) (*DAG, e
 			return nil, fmt.Errorf("compile: unknown template %q", item.Template)
 		}
 		node := &Node{
-			ID:         fmt.Sprintf("%s_%s", agentID, item.Name),
+			ID:         fmt.Sprintf("%s_%s_%s", agentID, runID, item.Name),
 			AgentID:    agentID,
 			Name:       item.Name,
 			Template:   item.Template,

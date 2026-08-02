@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"kubeai/internal/sandbox"
+	"adriane/internal/sandbox"
 )
 
 func TestReadWriteFile(t *testing.T) {

@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"sync"
 
-	"kubeai/internal/events"
-	"kubeai/internal/store"
+	"adriane/internal/events"
+	"adriane/internal/store"
 )
 
 // NodeStore is the persistence seam used by the engine.

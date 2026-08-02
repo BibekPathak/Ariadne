@@ -10,35 +10,41 @@ import (
 	"path/filepath"
 	"time"
 
-	"kubeai/internal/artifacts"
-	ctxbuilder "kubeai/internal/context"
-	"kubeai/internal/events"
-	"kubeai/internal/llm"
-	"kubeai/internal/sandbox"
-	"kubeai/internal/tasks"
-	"kubeai/internal/tools"
-	"kubeai/internal/workflow"
+	"adriane/internal/artifacts"
+	ctxbuilder "adriane/internal/context"
+	"adriane/internal/events"
+	"adriane/internal/llm"
+	"adriane/internal/memory"
+	"adriane/internal/sandbox"
+	"adriane/internal/tasks"
+	"adriane/internal/tools"
+	"adriane/internal/workflow"
 )
 
 type Config struct {
 	MaxIterations int
 	RepoBaseDir   string
 	Sandbox       sandbox.Sandbox
+	Memory        memory.Memory // optional; nil disables memory
+	UseSemantic   bool
 }
 
 // Worker executes a single node: it prepares an isolated sandbox, loads the
 // repo, runs the agent loop (LLM + tools) and returns outputs. Workers are
-// stateless: everything needed comes from the node inputs.
+// stateless: everything needed comes from the node inputs. Memory is
+// per-agent, so it is read and written around each task.
 type Worker struct {
-	cfg       Config
-	provider  llm.Provider
-	model     string
-	registry  *tools.Registry
-	templates *tasks.Registry
-	context   *ctxbuilder.Builder
-	artifacts *artifacts.Store
-	bus       events.EventBus
-	logger    *slog.Logger
+	cfg         Config
+	provider    llm.Provider
+	model       string
+	registry    *tools.Registry
+	templates   *tasks.Registry
+	context     *ctxbuilder.Builder
+	artifacts   *artifacts.Store
+	bus         events.EventBus
+	logger      *slog.Logger
+	memory      memory.Memory
+	useSemantic bool
 }
 
 func New(cfg Config, provider llm.Provider, model string, registry *tools.Registry,
@@ -51,7 +57,8 @@ func New(cfg Config, provider llm.Provider, model string, registry *tools.Regist
 		logger = slog.Default()
 	}
 	return &Worker{cfg: cfg, provider: provider, model: model, registry: registry,
-		templates: templates, context: ctxBuilder, artifacts: arts, bus: bus, logger: logger}
+		templates: templates, context: ctxBuilder, artifacts: arts, bus: bus, logger: logger,
+		memory: cfg.Memory, useSemantic: cfg.UseSemantic}
 }
 
 func (w *Worker) Run(ctx context.Context, node *workflow.Node) (map[string]any, error) {
@@ -86,8 +93,11 @@ func (w *Worker) Run(ctx context.Context, node *workflow.Node) (map[string]any, 
 	// Idempotent git identity so the agent can commit if asked to.
 	_, _ = session.ExecShell(ctx, "git config --global user.email agent@kubeai.local && git config --global user.name kubeai-agent")
 
-	outputs, transcript, err := w.runAgentLoop(ctx, node, tpl, session)
+	recalled := w.loadMemory(ctx, node)
+
+	outputs, transcript, err := w.runAgentLoop(ctx, node, tpl, session, recalled)
 	w.saveTranscript(ctx, node, transcript)
+	w.storeMemory(ctx, node, recalled, outputs, transcript, err)
 	if err != nil {
 		_ = w.bus.Publish(ctx, events.New(node.AgentID, node.ID, events.TaskFailed, map[string]any{"error": err.Error()}))
 		return nil, err
@@ -139,7 +149,7 @@ func gitClone(ctx context.Context, url, dest string) error {
 }
 
 // runAgentLoop drives the LLM tool-calling loop inside the sandbox.
-func (w *Worker) runAgentLoop(ctx context.Context, node *workflow.Node, tpl tasks.Template, session sandbox.Session) (map[string]any, []llm.Message, error) {
+func (w *Worker) runAgentLoop(ctx context.Context, node *workflow.Node, tpl tasks.Template, session sandbox.Session, recalled []ctxbuilder.MemoryItem) (map[string]any, []llm.Message, error) {
 	toolDefs := w.registry.Definitions(tpl.AllowedTools)
 
 	goal, _ := node.Inputs["goal"].(string)
@@ -158,6 +168,7 @@ func (w *Worker) runAgentLoop(ctx context.Context, node *workflow.Node, tpl task
 			Goal:         goal,
 			TaskPrompt:   tpl.Prompt,
 			Messages:     history,
+			Memories:     recalled,
 			MaxTokens:    16000,
 		})
 		req.Model = w.model

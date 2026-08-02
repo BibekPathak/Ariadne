@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"kubeai/internal/llm"
-	"kubeai/internal/tasks"
+	"adriane/internal/llm"
+	"adriane/internal/tasks"
 )
 
 // PlanItem is one unit of work in an execution plan. Dependencies are

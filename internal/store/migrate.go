@@ -8,7 +8,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 
-	"kubeai/migrations"
+	"adriane/migrations"
 
 	// register the pgx driver with the migrate framework via init().
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"

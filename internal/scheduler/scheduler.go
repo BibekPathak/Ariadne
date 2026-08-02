@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"sync"
 
-	"kubeai/internal/events"
-	"kubeai/internal/workflow"
+	"adriane/internal/events"
+	"adriane/internal/workflow"
 )
 
 // Worker is the executor abstraction the scheduler dispatches to. Phase 1 has

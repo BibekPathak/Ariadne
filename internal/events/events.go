@@ -18,6 +18,8 @@ const (
 	ToolFinished    Type = "tool_finished"
 	LLMCalled       Type = "llm_called"
 	WorkerHeartbeat Type = "worker_heartbeat"
+	MemoryRetrieved Type = "memory_retrieved"
+	MemorySaved     Type = "memory_saved"
 	AgentCompleted  Type = "agent_completed"
 	AgentFailed     Type = "agent_failed"
 )

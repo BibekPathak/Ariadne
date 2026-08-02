@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 
-	"kubeai/internal/events"
-	"kubeai/internal/planner"
-	"kubeai/internal/scheduler"
-	"kubeai/internal/store"
-	"kubeai/internal/tasks"
-	"kubeai/internal/workflow"
+	"adriane/internal/events"
+	"adriane/internal/planner"
+	"adriane/internal/scheduler"
+	"adriane/internal/store"
+	"adriane/internal/tasks"
+	"adriane/internal/workflow"
 )
 
 const (
@@ -121,7 +121,7 @@ func (a *AgentService) Run(ctx context.Context, agentID string) error {
 		plan.Tasks[i].Inputs["goal"] = agent.Goal
 	}
 
-	dag, err := a.compiler.Compile(agent.ID, plan)
+	dag, err := a.compiler.Compile(agent.ID, newRunID(), plan)
 	if err != nil {
 		a.fail(ctx, agent, err)
 		return err

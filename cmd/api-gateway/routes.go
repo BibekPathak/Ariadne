@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"time"
 
-	"kubeai/internal/agents"
-	"kubeai/internal/events"
+	"adriane/internal/agents"
+	"adriane/internal/events"
 )
 
 type api struct {
@@ -29,6 +29,7 @@ func routes(svc *agents.AgentService, bus events.EventBus, runTimeout time.Durat
 	mux.HandleFunc("GET /templates", a.listTemplates)
 	mux.HandleFunc("POST /agents", a.createAgent)
 	mux.HandleFunc("GET /agents/{id}", a.getAgent)
+	mux.HandleFunc("POST /agents/{id}/run", a.rerunAgent)
 	mux.HandleFunc("GET /agents/{id}/graph", a.getGraph)
 	mux.HandleFunc("GET /agents/{id}/events", a.getEvents)
 	mux.HandleFunc("GET /agents/{id}/events/stream", a.streamEvents)
@@ -81,6 +82,28 @@ func (a *api) getAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, agent)
+}
+
+// rerunAgent resumes an existing agent as a new run. Task IDs are scoped per
+// run, so runs never collide; memory stays keyed to the stable agent id.
+func (a *api) rerunAgent(w http.ResponseWriter, r *http.Request) {
+	agent, err := a.svc.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	if agent.Status == agents.StatusRunning {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is already running"})
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), a.runTimeout)
+		defer cancel()
+		if err := a.svc.Run(ctx, agent.ID); err != nil {
+			a.logger.Error("agent re-run failed", "agent", agent.ID, "err", err)
+		}
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]any{"agent_id": agent.ID, "status": "running"})
 }
 
 func (a *api) getGraph(w http.ResponseWriter, r *http.Request) {

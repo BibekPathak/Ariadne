@@ -3,8 +3,8 @@ package workflow
 import (
 	"testing"
 
-	"kubeai/internal/planner"
-	"kubeai/internal/tasks"
+	"adriane/internal/planner"
+	"adriane/internal/tasks"
 )
 
 func TestCompilerLinearChain(t *testing.T) {
@@ -14,7 +14,7 @@ func TestCompilerLinearChain(t *testing.T) {
 		{Name: "b", Template: "implement", DependsOn: []string{"a"}},
 		{Name: "c", Template: "test", DependsOn: []string{"b"}},
 	}}
-	dag, err := c.Compile("agent1", plan)
+	dag, err := c.Compile("agent1", "r1", plan)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestCompilerParallelBranches(t *testing.T) {
 		{Name: "docs", Template: "review", DependsOn: []string{"analyze"}},
 		{Name: "final", Template: "review", DependsOn: []string{"code", "docs"}},
 	}}
-	dag, err := c.Compile("agent1", plan)
+	dag, err := c.Compile("agent1", "r1", plan)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestCompilerUnknownTemplate(t *testing.T) {
 	plan := &planner.ExecutionPlan{Tasks: []planner.PlanItem{
 		{Name: "x", Template: "nope"},
 	}}
-	if _, err := c.Compile("agent1", plan); err == nil {
+	if _, err := c.Compile("agent1", "r1", plan); err == nil {
 		t.Fatal("expected error for unknown template")
 	}
 }
@@ -81,7 +81,7 @@ func TestCompilerUnknownDependency(t *testing.T) {
 		{Name: "a", Template: "analyze"},
 		{Name: "b", Template: "implement", DependsOn: []string{"ghost"}},
 	}}
-	if _, err := c.Compile("agent1", plan); err == nil {
+	if _, err := c.Compile("agent1", "r1", plan); err == nil {
 		t.Fatal("expected error for unknown dependency")
 	}
 }
@@ -91,7 +91,7 @@ func TestCompilerSelfDependency(t *testing.T) {
 	plan := &planner.ExecutionPlan{Tasks: []planner.PlanItem{
 		{Name: "a", Template: "analyze", DependsOn: []string{"a"}},
 	}}
-	if _, err := c.Compile("agent1", plan); err == nil {
+	if _, err := c.Compile("agent1", "r1", plan); err == nil {
 		t.Fatal("expected error for self dependency")
 	}
 }
@@ -103,7 +103,7 @@ func TestDAGBlocked(t *testing.T) {
 		{Name: "b", Template: "implement", DependsOn: []string{"a"}},
 		{Name: "c", Template: "implement", DependsOn: []string{"b"}},
 	}}
-	dag, _ := c.Compile("agent1", plan)
+	dag, _ := c.Compile("agent1", "r1", plan)
 	dag.byName("a").Status = StatusFailed
 	dag.Blocked()
 	if dag.byName("b").Status != StatusBlocked {

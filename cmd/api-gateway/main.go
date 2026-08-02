@@ -9,20 +9,21 @@ import (
 	"os"
 	"time"
 
-	"kubeai/internal/agents"
-	"kubeai/internal/artifacts"
-	"kubeai/internal/config"
-	ctxbuilder "kubeai/internal/context"
-	"kubeai/internal/events"
-	"kubeai/internal/llm"
-	"kubeai/internal/planner"
-	"kubeai/internal/sandbox"
-	"kubeai/internal/scheduler"
-	"kubeai/internal/store"
-	"kubeai/internal/tasks"
-	"kubeai/internal/tools"
-	"kubeai/internal/worker"
-	"kubeai/internal/workflow"
+	"adriane/internal/agents"
+	"adriane/internal/artifacts"
+	"adriane/internal/config"
+	ctxbuilder "adriane/internal/context"
+	"adriane/internal/events"
+	"adriane/internal/llm"
+	"adriane/internal/memory"
+	"adriane/internal/planner"
+	"adriane/internal/sandbox"
+	"adriane/internal/scheduler"
+	"adriane/internal/store"
+	"adriane/internal/tasks"
+	"adriane/internal/tools"
+	"adriane/internal/worker"
+	"adriane/internal/workflow"
 )
 
 func main() {
@@ -84,7 +85,8 @@ func wire(ctx context.Context, cfg config.Config, st *store.Store, bus events.Ev
 		logger.Warn("no REQUESTY_API_KEY set; using demo provider (offline mode)")
 	} else {
 		provider = llm.NewOpenAICompatible(llm.Config{
-			Name: "requesty", BaseURL: cfg.RequestyBase, APIKey: cfg.RequestyAPIKey, Model: cfg.LLMModel,
+			Name: "requesty", BaseURL: cfg.RequestyBase, APIKey: cfg.RequestyAPIKey,
+			Model: cfg.LLMModel, EmbeddingModel: cfg.EmbeddingModel,
 		})
 		model = cfg.LLMModel
 	}
@@ -111,10 +113,44 @@ func wire(ctx context.Context, cfg config.Config, st *store.Store, bus events.Ev
 		BaseDir: cfg.RepoBaseDir,
 	})
 
+	// Memory tier (Phase 2): short-term in Redis, long-term in Postgres,
+	// semantic in a Go-native vector store. Disabled when MEMORY_ENABLED=false.
+	var mem memory.Memory
+	useSemantic := false
+	if cfg.MemoryEnabled {
+		short, err := memory.NewShortTermRedis(cfg.RedisAddr, cfg.MemoryShortTTL)
+		if err != nil {
+			logger.Warn("memory short-term disabled", "err", err)
+		} else {
+			vec, err := memory.NewVectorStore(cfg.MemoryVectorDir)
+			if err != nil {
+				logger.Warn("memory semantic disabled", "err", err)
+				_ = short.Close()
+			} else {
+				m, err := memory.NewManager(memory.ManagerConfig{
+					ShortTerm: short,
+					LongTerm:  memory.NewLongTermPostgres(st.Memories),
+					Semantic:  vec,
+					Embedder:  provider,
+					Logger:    logger,
+				})
+				if err != nil {
+					logger.Warn("memory manager disabled", "err", err)
+					_ = short.Close()
+				} else {
+					mem = m
+					useSemantic = true
+				}
+			}
+		}
+	}
+
 	w := worker.New(worker.Config{
 		MaxIterations: cfg.MaxIterations,
 		RepoBaseDir:   cfg.RepoBaseDir,
 		Sandbox:       sbox,
+		Memory:        mem,
+		UseSemantic:   useSemantic,
 	}, provider, model, toolRegistry, taskTemplates, ctxbuilder.New(), arts, bus, logger)
 
 	sched := scheduler.NewScheduler(bus, w, logger)

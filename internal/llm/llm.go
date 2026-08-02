@@ -61,4 +61,7 @@ type Response struct {
 type Provider interface {
 	Name() string
 	Generate(ctx context.Context, req Request) (*Response, error)
+	// Embed returns dense vectors for the given texts. Implementations must
+	// return a vector for every input text.
+	Embed(ctx context.Context, texts []string) ([][]float32, error)
 }
