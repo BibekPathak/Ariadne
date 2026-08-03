@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"adriane/internal/llm"
+	"adriane/internal/router"
 	"adriane/internal/tasks"
 )
 
@@ -39,15 +40,16 @@ type PlanRequest struct {
 }
 
 // LLMPlanner asks the model to produce an execution plan expressed in task
-// templates.
+// templates. The planner routes through the model router under the planner
+// policy (at least coding tier, reasoning for complex goals).
 type LLMPlanner struct {
-	provider llm.Provider
+	router   *router.Router
 	registry *tasks.Registry
-	model    string
+	policy   router.Policy
 }
 
-func NewLLMPlanner(provider llm.Provider, registry *tasks.Registry, model string) *LLMPlanner {
-	return &LLMPlanner{provider: provider, registry: registry, model: model}
+func NewLLMPlanner(rtr *router.Router, registry *tasks.Registry) *LLMPlanner {
+	return &LLMPlanner{router: rtr, registry: registry, policy: router.PlannerPolicy()}
 }
 
 const planSchema = `You are an agent planner. Given a goal, break it into a DAG of tasks. Reply with JSON only:
@@ -61,7 +63,11 @@ func (p *LLMPlanner) Plan(ctx context.Context, req PlanRequest) (*ExecutionPlan,
 		{Role: llm.RoleSystem, Content: planSchema},
 		{Role: llm.RoleUser, Content: user},
 	}
-	resp, err := p.provider.Generate(ctx, llm.Request{Model: p.model, Messages: msgs})
+	rr := router.RouteRequest{TaskType: "planner", RequiresStructuredOutput: true}
+	if router.IsComplex(req.Goal) {
+		rr.TierHint = router.TierReasoning
+	}
+	resp, _, err := p.router.GenerateRoute(ctx, llm.Request{Messages: msgs}, rr, p.policy)
 	if err != nil {
 		return nil, fmt.Errorf("planner llm call: %w", err)
 	}

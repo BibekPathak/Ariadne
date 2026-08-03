@@ -12,6 +12,7 @@ import (
 	ctxbuilder "adriane/internal/context"
 	"adriane/internal/events"
 	"adriane/internal/llm"
+	"adriane/internal/router"
 	"adriane/internal/sandbox"
 	"adriane/internal/tasks"
 	"adriane/internal/tools"
@@ -56,7 +57,7 @@ func TestWorkerResumesFromCheckpoint(t *testing.T) {
 		RepoBaseDir:   t.TempDir(),
 		Sandbox:       sandbox.FakeSandbox{},
 		Checkpoints:   cps,
-	}, provider, "", tools.NewRegistry(tools.ReadFileTool{}), tasks.NewRegistry(),
+	}, router.FromProvider(provider), tools.NewRegistry(tools.ReadFileTool{}), tasks.NewRegistry(),
 		ctxbuilder.New(), arts, bus, slog.New(slog.DiscardHandler))
 
 	node := &workflow.Node{
@@ -122,7 +123,7 @@ func TestWorkerStoresCheckpointDuringRun(t *testing.T) {
 		RepoBaseDir:   t.TempDir(),
 		Sandbox:       sandbox.FakeSandbox{},
 		Checkpoints:   cps,
-	}, provider, "", tools.NewRegistry(tools.ReadFileTool{}), tasks.NewRegistry(),
+	}, router.FromProvider(provider), tools.NewRegistry(tools.ReadFileTool{}), tasks.NewRegistry(),
 		ctxbuilder.New(), arts, bus, slog.New(slog.DiscardHandler))
 
 	node := &workflow.Node{

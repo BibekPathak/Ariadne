@@ -16,6 +16,7 @@ import (
 	"adriane/internal/events"
 	"adriane/internal/llm"
 	"adriane/internal/memory"
+	"adriane/internal/router"
 	"adriane/internal/sandbox"
 	"adriane/internal/tasks"
 	"adriane/internal/tools"
@@ -37,8 +38,7 @@ type Config struct {
 // per-agent, so it is read and written around each task.
 type Worker struct {
 	cfg         Config
-	provider    llm.Provider
-	model       string
+	router      *router.Router
 	registry    *tools.Registry
 	templates   *tasks.Registry
 	context     *ctxbuilder.Builder
@@ -50,7 +50,7 @@ type Worker struct {
 	checkpoints checkpoint.Store
 }
 
-func New(cfg Config, provider llm.Provider, model string, registry *tools.Registry,
+func New(cfg Config, rtr *router.Router, registry *tools.Registry,
 	templates *tasks.Registry, ctxBuilder *ctxbuilder.Builder, arts *artifacts.Store,
 	bus events.Publisher, logger *slog.Logger) *Worker {
 	if cfg.MaxIterations <= 0 {
@@ -59,7 +59,7 @@ func New(cfg Config, provider llm.Provider, model string, registry *tools.Regist
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Worker{cfg: cfg, provider: provider, model: model, registry: registry,
+	return &Worker{cfg: cfg, router: rtr, registry: registry,
 		templates: templates, context: ctxBuilder, artifacts: arts, bus: bus, logger: logger,
 		memory: cfg.Memory, useSemantic: cfg.UseSemantic, checkpoints: cfg.Checkpoints}
 }
@@ -189,13 +189,15 @@ func (w *Worker) runAgentLoop(ctx context.Context, node *workflow.Node, tpl task
 			Memories:     recalled,
 			MaxTokens:    16000,
 		})
-		req.Model = w.model
 		req.Tools = toolDefs
 
-		resp, err := w.provider.Generate(ctx, *req)
+		resp, route, err := w.router.GenerateRoute(ctx, *req, routeFor(tpl, goal), router.WorkerPolicy())
 		if err != nil {
 			return nil, transcript, fmt.Errorf("llm call: %w", err)
 		}
+		_ = w.bus.Publish(ctx, events.New(node.AgentID, node.ID, events.ModelRouted, map[string]any{
+			"task": tpl.Name, "tier": string(route.Tier), "model": route.Model, "gateway": route.Gateway,
+		}))
 		_ = w.bus.Publish(ctx, events.New(node.AgentID, node.ID, events.LLMCalled, map[string]any{
 			"prompt_tokens":     resp.Usage.PromptTokens,
 			"completion_tokens": resp.Usage.CompletionTokens,

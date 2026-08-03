@@ -92,10 +92,10 @@ func wire(ctx context.Context, cfg config.Config, st *store.Store, bus events.Ev
 	agentTemplates := agents.NewTemplateRegistry()
 
 	var plannerIf planner.Planner
-	if cfg.RequestyAPIKey == "" {
+	if cfg.RouterPrimaryKey == "" {
 		plannerIf = planner.StaticPlanner{}
 	} else {
-		plannerIf = planner.NewLLMPlanner(stack.Provider, stack.TaskTemplates, stack.Model)
+		plannerIf = planner.NewLLMPlanner(stack.Router, stack.TaskTemplates)
 	}
 
 	var workerIf scheduler.Worker = stack.Worker

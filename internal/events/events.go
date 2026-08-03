@@ -17,6 +17,7 @@ const (
 	ToolCalled      Type = "tool_called"
 	ToolFinished    Type = "tool_finished"
 	LLMCalled       Type = "llm_called"
+	ModelRouted     Type = "model_routed"
 	WorkerHeartbeat Type = "worker_heartbeat"
 	MemoryRetrieved Type = "memory_retrieved"
 	MemorySaved     Type = "memory_saved"

@@ -13,6 +13,7 @@ import (
 	"adriane/internal/events"
 	"adriane/internal/llm"
 	"adriane/internal/memory"
+	"adriane/internal/router"
 	"adriane/internal/sandbox"
 	"adriane/internal/tasks"
 	"adriane/internal/tools"
@@ -73,7 +74,7 @@ func TestWorkerLoadsAndStoresMemory(t *testing.T) {
 		Sandbox:       sandbox.FakeSandbox{},
 		Memory:        mem,
 		UseSemantic:   true,
-	}, llm.DemoProvider{}, "", tools.NewRegistry(tools.ListFilesTool{}, tools.ReadFileTool{}),
+	}, router.FromProvider(llm.DemoProvider{}), tools.NewRegistry(tools.ListFilesTool{}, tools.ReadFileTool{}),
 		tasks.NewRegistry(), ctxbuilder.New(), arts, bus, slog.New(slog.DiscardHandler))
 
 	node := &workflow.Node{
@@ -115,7 +116,7 @@ func TestWorkerNoMemoryNoop(t *testing.T) {
 		MaxIterations: 5,
 		RepoBaseDir:   t.TempDir(),
 		Sandbox:       sandbox.FakeSandbox{},
-	}, llm.DemoProvider{}, "", tools.NewRegistry(tools.ListFilesTool{}),
+	}, router.FromProvider(llm.DemoProvider{}), tools.NewRegistry(tools.ListFilesTool{}),
 		tasks.NewRegistry(), ctxbuilder.New(), arts, bus, slog.New(slog.DiscardHandler))
 
 	node := &workflow.Node{

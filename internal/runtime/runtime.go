@@ -14,6 +14,7 @@ import (
 	"adriane/internal/events"
 	"adriane/internal/llm"
 	"adriane/internal/memory"
+	"adriane/internal/router"
 	"adriane/internal/sandbox"
 	"adriane/internal/store"
 	"adriane/internal/tasks"
@@ -22,8 +23,8 @@ import (
 )
 
 type Stack struct {
-	Provider      llm.Provider
-	Model         string
+	Router        *router.Router
+	Provider      llm.Provider // == Router (implements llm.Provider)
 	TaskTemplates *tasks.Registry
 	Worker        *worker.Worker
 	Memory        memory.Memory
@@ -37,7 +38,7 @@ func Build(cfg config.Config, st *store.Store, bus events.Publisher, logger *slo
 		return nil, err
 	}
 
-	provider, model := providerFor(cfg, logger)
+	rtr := buildRouter(cfg, logger)
 	toolRegistry := tools.NewRegistry(
 		tools.ReadFileTool{}, tools.WriteFileTool{}, tools.ListFilesTool{},
 		tools.ShellTool{}, tools.GitTool{}, tools.HTTPGetTool{},
@@ -45,7 +46,7 @@ func Build(cfg config.Config, st *store.Store, bus events.Publisher, logger *slo
 	taskTemplates := tasks.NewRegistry()
 	sbox := sandboxFor(cfg, logger)
 
-	mem, useSemantic := buildMemory(cfg, st, provider, logger)
+	mem, useSemantic := buildMemory(cfg, st, rtr, logger)
 
 	var cps checkpoint.Store
 	if cfg.CheckpointEnabled {
@@ -59,20 +60,31 @@ func Build(cfg config.Config, st *store.Store, bus events.Publisher, logger *slo
 		Memory:        mem,
 		UseSemantic:   useSemantic,
 		Checkpoints:   cps,
-	}, provider, model, toolRegistry, taskTemplates, ctxbuilder.New(), arts, bus, logger)
+	}, rtr, toolRegistry, taskTemplates, ctxbuilder.New(), arts, bus, logger)
 
-	return &Stack{Provider: provider, Model: model, TaskTemplates: taskTemplates, Worker: w, Memory: mem}, nil
+	return &Stack{Router: rtr, Provider: rtr, TaskTemplates: taskTemplates, Worker: w, Memory: mem}, nil
 }
 
-func providerFor(cfg config.Config, logger *slog.Logger) (llm.Provider, string) {
-	if cfg.RequestyAPIKey == "" {
-		logger.Warn("no REQUESTY_API_KEY set; using demo provider (offline mode)")
-		return llm.DemoProvider{}, ""
+func buildRouter(cfg config.Config, logger *slog.Logger) *router.Router {
+	if cfg.RouterPrimaryKey == "" {
+		logger.Warn("no ROUTER_PRIMARY_API_KEY set; using demo provider (offline mode)")
 	}
-	return llm.NewOpenAICompatible(llm.Config{
-		Name: "requesty", BaseURL: cfg.RequestyBase, APIKey: cfg.RequestyAPIKey,
-		Model: cfg.LLMModel, EmbeddingModel: cfg.EmbeddingModel,
-	}), cfg.LLMModel
+	rtr := router.New(router.Config{
+		FastModel:      cfg.RouterFastModel,
+		CodingModel:    cfg.RouterCodingModel,
+		ReasoningModel: cfg.RouterReasoningModel,
+		VisionModel:    cfg.RouterVisionModel,
+		PrimaryURL:     cfg.RouterPrimaryURL,
+		PrimaryKey:     cfg.RouterPrimaryKey,
+		FallbackURL:    cfg.RouterFallbackURL,
+		FallbackKey:    cfg.RouterFallbackKey,
+		EmbeddingModel: cfg.EmbeddingModel,
+		DefaultPolicy:  router.PlannerPolicy(),
+	})
+	if cfg.RouterFallbackKey != "" {
+		logger.Info("model router", "fallback", cfg.RouterFallbackURL)
+	}
+	return rtr
 }
 
 func sandboxFor(cfg config.Config, logger *slog.Logger) sandbox.Sandbox {

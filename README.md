@@ -4,13 +4,13 @@ Kubernetes for AI agents: a distributed execution platform where agents are
 created, planned, scheduled, executed in isolated sandboxes, and replayable
 from an event-sourced log.
 
-This is **Phase 0-6** of a ten-phase roadmap: a distributed platform with
+This is **Phase 0-7** of a ten-phase roadmap: a distributed platform with
 persistent three-tier memory, a ranked/compressed context builder, parallel
 DAG execution, remote workers over NATS with dead-worker reassignment, task
-checkpointing, a hardened Docker sandbox, and a **Firecracker microVM
-runtime** with a warm-pool — architected so the remaining phases (model
-router, evaluation, observability, production features) slot in behind
-existing interfaces.
+checkpointing, hardened Docker + **Firecracker microVM** sandboxes, and a
+**policy-based model router** with cross-gateway failover — architected so the
+remaining phases (evaluation, observability, production features) slot in
+behind existing interfaces.
 
 ## Architecture
 
@@ -87,6 +87,26 @@ interface — the demo suite runs unchanged on either:
   results, claims, heartbeats and events flow over JSON on NATS subjects; the
   control plane persists events to Postgres for replay. Workers that stop
   heartbeating are marked dead and their in-flight tasks are reassigned.
+
+## Model router (Phase 7)
+
+`internal/router` selects the model and gateway for every LLM call. It is
+policy-based and provider-agnostic: callers describe the task
+(`RouteRequest{TaskType, TierHint, LatencyBudget, CostBudget,
+RequiresToolCalling, RequiresStructuredOutput}`) and the router maps it to a
+logical tier (`fast | coding | reasoning | vision`), then to a model and
+gateway.
+
+- **Logical tiers, not model IDs**: `ROUTER_FAST_MODEL`, `ROUTER_CODING_MODEL`
+  (defaults to `LLM_MODEL`), `ROUTER_REASONING_MODEL`, `ROUTER_VISION_MODEL`.
+- **Cross-gateway failover**: `ROUTER_PRIMARY_URL/API_KEY` (defaults to
+  Requesty) with optional `ROUTER_FALLBACK_URL/API_KEY`; if the primary
+  gateway errors, the router falls back to the secondary.
+- **Policies**: the worker may use any tier (fast for `test`/`analyze`,
+  coding for `implement`/`docs`, reasoning for complex goals); the planner is
+  pinned to at least the coding tier and never the fast tier.
+- Every call emits a `model_routed` event (`{task, tier, model, gateway}`),
+  visible in the replay log.
 
 ## Safety & resumption
 
@@ -171,6 +191,7 @@ internal/sandbox       Sandbox interface: Docker + Firecracker (microVM) runtime
 internal/tools         tool registry: read/write/shell/git/http
 internal/context       context builder: rank → compress → token budget
 internal/llm           Provider interface: Requesty + demo provider + embeddings
+internal/router        policy-based model router: tiers, gateways, failover
 internal/memory        three-tier memory: Redis (short), Postgres (long), vectors (semantic)
 internal/events        event bus: in-memory + NATS JetStream
 internal/checkpoint    task checkpointing at tool boundaries (Postgres)
@@ -182,5 +203,5 @@ demo/repo              sample project used by the demos
 
 ## Roadmap
 
-Phase 7 model router · Phase 8 evaluation · Phase 9 observability + execution
-graph UI · Phase 10 production features.
+Phase 8 evaluation · Phase 9 observability + execution graph UI · Phase 10
+production features.

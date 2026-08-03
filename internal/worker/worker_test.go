@@ -11,6 +11,7 @@ import (
 	ctxbuilder "adriane/internal/context"
 	"adriane/internal/events"
 	"adriane/internal/llm"
+	"adriane/internal/router"
 	"adriane/internal/sandbox"
 	"adriane/internal/tasks"
 	"adriane/internal/tools"
@@ -44,7 +45,7 @@ func TestWorkerAgentLoopEndToEnd(t *testing.T) {
 		MaxIterations: 10,
 		RepoBaseDir:   t.TempDir(),
 		Sandbox:       sandbox.FakeSandbox{},
-	}, provider, "", tools.NewRegistry(tools.ReadFileTool{}), tasks.NewRegistry(),
+	}, router.FromProvider(provider), tools.NewRegistry(tools.ReadFileTool{}), tasks.NewRegistry(),
 		ctxbuilder.New(), arts, bus, slog.New(slog.DiscardHandler))
 
 	node := &workflow.Node{
@@ -91,7 +92,7 @@ func TestWorkerExceedsIterations(t *testing.T) {
 		MaxIterations: 2,
 		RepoBaseDir:   t.TempDir(),
 		Sandbox:       sandbox.FakeSandbox{},
-	}, provider, "", tools.NewRegistry(tools.ReadFileTool{}), tasks.NewRegistry(),
+	}, router.FromProvider(provider), tools.NewRegistry(tools.ReadFileTool{}), tasks.NewRegistry(),
 		ctxbuilder.New(), arts, bus, slog.New(slog.DiscardHandler))
 
 	node := &workflow.Node{

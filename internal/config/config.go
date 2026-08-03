@@ -42,6 +42,15 @@ type Config struct {
 	FirecrackerVCPU    int
 	FirecrackerMemMiB  int
 
+	RouterFastModel      string
+	RouterCodingModel    string
+	RouterReasoningModel string
+	RouterVisionModel    string
+	RouterPrimaryURL     string
+	RouterPrimaryKey     string
+	RouterFallbackURL    string
+	RouterFallbackKey    string
+
 	SandboxImage   string
 	SandboxCPU     string
 	SandboxMemMB   int
@@ -90,16 +99,25 @@ func Load() Config {
 		FirecrackerPort:    getInt("FIRECRACKER_PORT", 5200),
 		FirecrackerVCPU:    getInt("FIRECRACKER_VCPU", 2),
 		FirecrackerMemMiB:  getInt("FIRECRACKER_MEM_MIB", 1024),
-		SandboxImage:       get("SANDBOX_IMAGE", "kubeai-sandbox:local"),
-		SandboxCPU:         get("SANDBOX_CPU", "1"),
-		SandboxMemMB:       getInt("SANDBOX_MEM_MB", 1024),
-		SandboxNetwork:     get("SANDBOX_NETWORK", "none"),
-		ArtifactsDir:       get("ARTIFACTS_DIR", "./artifacts"),
-		RepoBaseDir:        get("REPO_BASE_DIR", "/tmp/kubeai-repos"),
-		DemoRepoPath:       get("DEMO_REPO_PATH", "./demo/repo"),
-		MaxIterations:      getInt("MAX_ITERATIONS", 25),
-		Timeout:            time.Duration(getInt("AGENT_TIMEOUT_MIN", 30)) * time.Minute,
-		EngineConcurrency:  getInt("ENGINE_CONCURRENCY", 4),
+
+		RouterFastModel:      get("ROUTER_FAST_MODEL", ""),
+		RouterCodingModel:    get("ROUTER_CODING_MODEL", os.Getenv("LLM_MODEL")),
+		RouterReasoningModel: get("ROUTER_REASONING_MODEL", ""),
+		RouterVisionModel:    get("ROUTER_VISION_MODEL", ""),
+		RouterPrimaryURL:     get("ROUTER_PRIMARY_URL", get("REQUESTY_BASE_URL", "https://requesty.ai/v1")),
+		RouterPrimaryKey:     get("ROUTER_PRIMARY_API_KEY", os.Getenv("REQUESTY_API_KEY")),
+		RouterFallbackURL:    get("ROUTER_FALLBACK_URL", ""),
+		RouterFallbackKey:    get("ROUTER_FALLBACK_API_KEY", ""),
+		SandboxImage:         get("SANDBOX_IMAGE", "kubeai-sandbox:local"),
+		SandboxCPU:           get("SANDBOX_CPU", "1"),
+		SandboxMemMB:         getInt("SANDBOX_MEM_MB", 1024),
+		SandboxNetwork:       get("SANDBOX_NETWORK", "none"),
+		ArtifactsDir:         get("ARTIFACTS_DIR", "./artifacts"),
+		RepoBaseDir:          get("REPO_BASE_DIR", "/tmp/kubeai-repos"),
+		DemoRepoPath:         get("DEMO_REPO_PATH", "./demo/repo"),
+		MaxIterations:        getInt("MAX_ITERATIONS", 25),
+		Timeout:              time.Duration(getInt("AGENT_TIMEOUT_MIN", 30)) * time.Minute,
+		EngineConcurrency:    getInt("ENGINE_CONCURRENCY", 4),
 	}
 }
 
