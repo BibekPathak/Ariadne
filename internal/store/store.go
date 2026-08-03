@@ -11,12 +11,13 @@ import (
 var ErrNotFound = errors.New("not found")
 
 type Store struct {
-	pool      *pgxpool.Pool
-	Agents    *AgentsRepo
-	Tasks     *TasksRepo
-	Events    *EventsRepo
-	Artifacts *ArtifactsRepo
-	Memories  *MemoryRepo
+	pool        *pgxpool.Pool
+	Agents      *AgentsRepo
+	Tasks       *TasksRepo
+	Events      *EventsRepo
+	Artifacts   *ArtifactsRepo
+	Memories    *MemoryRepo
+	Checkpoints *CheckpointRepo
 }
 
 func New(ctx context.Context, databaseURL string) (*Store, error) {
@@ -33,6 +34,7 @@ func New(ctx context.Context, databaseURL string) (*Store, error) {
 	s.Events = &EventsRepo{pool: pool}
 	s.Artifacts = &ArtifactsRepo{pool: pool}
 	s.Memories = &MemoryRepo{pool: pool}
+	s.Checkpoints = &CheckpointRepo{pool: pool}
 	return s, nil
 }
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"adriane/internal/artifacts"
+	"adriane/internal/checkpoint"
 	ctxbuilder "adriane/internal/context"
 	"adriane/internal/events"
 	"adriane/internal/llm"
@@ -27,6 +28,7 @@ type Config struct {
 	Sandbox       sandbox.Sandbox
 	Memory        memory.Memory // optional; nil disables memory
 	UseSemantic   bool
+	Checkpoints   checkpoint.Store // optional; nil disables checkpointing
 }
 
 // Worker executes a single node: it prepares an isolated sandbox, loads the
@@ -45,6 +47,7 @@ type Worker struct {
 	logger      *slog.Logger
 	memory      memory.Memory
 	useSemantic bool
+	checkpoints checkpoint.Store
 }
 
 func New(cfg Config, provider llm.Provider, model string, registry *tools.Registry,
@@ -58,7 +61,7 @@ func New(cfg Config, provider llm.Provider, model string, registry *tools.Regist
 	}
 	return &Worker{cfg: cfg, provider: provider, model: model, registry: registry,
 		templates: templates, context: ctxBuilder, artifacts: arts, bus: bus, logger: logger,
-		memory: cfg.Memory, useSemantic: cfg.UseSemantic}
+		memory: cfg.Memory, useSemantic: cfg.UseSemantic, checkpoints: cfg.Checkpoints}
 }
 
 func (w *Worker) Run(ctx context.Context, node *workflow.Node) (map[string]any, error) {
@@ -161,8 +164,23 @@ func (w *Worker) runAgentLoop(ctx context.Context, node *workflow.Node, tpl task
 	ec := &tools.ExecContext{Session: session, Workdir: "/repo"}
 	transcript := []llm.Message{}
 
+	// Resume from a checkpoint if one exists (task was interrupted after a
+	// tool boundary); otherwise start fresh.
+	startIter := 0
+	if w.checkpoints != nil {
+		if cp, err := w.checkpoints.Load(ctx, node.ID); err == nil && cp != nil {
+			history = cp.Messages
+			transcript = append(transcript, cp.Messages...)
+			startIter = cp.Iteration
+			_ = w.bus.Publish(ctx, events.New(node.AgentID, node.ID, events.RetryScheduled, map[string]any{
+				"attempt": 1, "max": node.MaxAttempt,
+				"error": "resuming from checkpoint at iteration " + itoa(startIter),
+			}))
+		}
+	}
+
 	var toolUseCount int
-	for i := 0; i < w.cfg.MaxIterations; i++ {
+	for i := startIter; i < w.cfg.MaxIterations; i++ {
 		req := w.context.Build(ctxbuilder.Input{
 			SystemPrompt: systemPrompt,
 			Goal:         goal,
@@ -187,8 +205,10 @@ func (w *Worker) runAgentLoop(ctx context.Context, node *workflow.Node, tpl task
 		assistant := llm.Message{Role: llm.RoleAssistant, Content: resp.Content, ToolCalls: resp.ToolCalls}
 		transcript = append(transcript, assistant)
 		history = append(history, assistant)
+		w.saveCheckpoint(ctx, node, i+1, history)
 
 		if len(resp.ToolCalls) == 0 {
+			w.clearCheckpoint(ctx, node)
 			return map[string]any{
 				"final_message": resp.Content,
 				"tool_calls":    toolUseCount,
@@ -215,8 +235,29 @@ func (w *Worker) runAgentLoop(ctx context.Context, node *workflow.Node, tpl task
 			transcript = append(transcript, toolMsg)
 			history = append(history, toolMsg)
 		}
+		w.saveCheckpoint(ctx, node, i+1, history)
 	}
 	return nil, transcript, fmt.Errorf("agent exceeded %d iterations", w.cfg.MaxIterations)
+}
+
+func (w *Worker) saveCheckpoint(ctx context.Context, node *workflow.Node, iteration int, history []llm.Message) {
+	if w.checkpoints == nil {
+		return
+	}
+	_ = w.checkpoints.Save(ctx, &checkpoint.Checkpoint{
+		AgentID: node.AgentID, TaskID: node.ID, Iteration: iteration, Messages: history,
+	})
+}
+
+func (w *Worker) clearCheckpoint(ctx context.Context, node *workflow.Node) {
+	if w.checkpoints == nil {
+		return
+	}
+	_ = w.checkpoints.Delete(ctx, node.ID)
+}
+
+func itoa(n int) string {
+	return fmt.Sprintf("%d", n)
 }
 
 func (w *Worker) saveTranscript(ctx context.Context, node *workflow.Node, transcript []llm.Message) {

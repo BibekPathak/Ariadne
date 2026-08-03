@@ -17,6 +17,7 @@ type ScriptedProvider struct {
 	mu       sync.Mutex
 	queue    []Response
 	finished atomic.Bool
+	Requests []Request // recorded for assertions
 }
 
 func NewScriptedProvider(name string, responses ...Response) *ScriptedProvider {
@@ -32,6 +33,7 @@ func (p *ScriptedProvider) Embed(ctx context.Context, texts []string) ([][]float
 func (p *ScriptedProvider) Generate(ctx context.Context, req Request) (*Response, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.Requests = append(p.Requests, cloneRequest(req))
 	if len(p.queue) > 0 {
 		r := p.queue[0]
 		p.queue = p.queue[1:]
@@ -42,4 +44,10 @@ func (p *ScriptedProvider) Generate(ctx context.Context, req Request) (*Response
 	}
 	p.finished.Store(true)
 	return &Response{Content: "Done."}, nil
+}
+
+func cloneRequest(r Request) Request {
+	r.Messages = append([]Message(nil), r.Messages...)
+	r.Tools = append([]Tool(nil), r.Tools...)
+	return r
 }

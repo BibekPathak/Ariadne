@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"adriane/internal/artifacts"
+	"adriane/internal/checkpoint"
 	"adriane/internal/config"
 	ctxbuilder "adriane/internal/context"
 	"adriane/internal/events"
@@ -47,9 +48,19 @@ func Build(cfg config.Config, st *store.Store, bus events.Publisher, logger *slo
 		MemMB:   cfg.SandboxMemMB,
 		Network: cfg.SandboxNetwork,
 		BaseDir: cfg.RepoBaseDir,
+
+		ReadOnlyRoot: cfg.SandboxReadOnly,
+		CapDropAll:   cfg.SandboxCapDrop,
+		PidsLimit:    cfg.SandboxPidsLimit,
+		RunAsUser:    cfg.SandboxUser,
 	})
 
 	mem, useSemantic := buildMemory(cfg, st, provider, logger)
+
+	var cps checkpoint.Store
+	if cfg.CheckpointEnabled {
+		cps = checkpoint.NewPostgres(st.Checkpoints)
+	}
 
 	w := worker.New(worker.Config{
 		MaxIterations: cfg.MaxIterations,
@@ -57,6 +68,7 @@ func Build(cfg config.Config, st *store.Store, bus events.Publisher, logger *slo
 		Sandbox:       sbox,
 		Memory:        mem,
 		UseSemantic:   useSemantic,
+		Checkpoints:   cps,
 	}, provider, model, toolRegistry, taskTemplates, ctxbuilder.New(), arts, bus, logger)
 
 	return &Stack{Provider: provider, Model: model, TaskTemplates: taskTemplates, Worker: w, Memory: mem}, nil

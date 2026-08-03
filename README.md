@@ -4,12 +4,12 @@ Kubernetes for AI agents: a distributed execution platform where agents are
 created, planned, scheduled, executed in isolated sandboxes, and replayable
 from an event-sourced log.
 
-This is **Phase 0-4** of a ten-phase roadmap: a distributed platform with
+This is **Phase 0-5** of a ten-phase roadmap: a distributed platform with
 persistent three-tier memory, a ranked/compressed context builder, parallel
-DAG execution, and **remote workers over NATS** with dead-worker reassignment —
-architected so the remaining phases (checkpointing, Firecracker, model router,
-evaluation, observability, production features) slot in behind existing
-interfaces.
+DAG execution, **remote workers over NATS** with dead-worker reassignment,
+**task checkpointing at tool boundaries**, and a **hardened Docker sandbox** —
+architected so the remaining phases (Firecracker, model router, evaluation,
+observability, production features) slot in behind existing interfaces.
 
 ## Architecture
 
@@ -70,6 +70,19 @@ make demo-distributed         # 3 remote workers over NATS; kills one mid-run
   results, claims, heartbeats and events flow over JSON on NATS subjects; the
   control plane persists events to Postgres for replay. Workers that stop
   heartbeating are marked dead and their in-flight tasks are reassigned.
+
+## Safety & resumption
+
+- **Hardened sandbox** (Phase 5): read-only root filesystem with a writable
+  `/tmp` tmpfs, all Linux capabilities dropped, `no-new-privileges`, a
+  non-root user, `--network none` by default, and a process-count cap — a
+  hostile task cannot touch the host, escape the sandbox, or fork-bomb. Verify
+  with `SANDBOX_TEST_DOCKER=1 go test ./internal/sandbox/ -run Hardening -v`.
+- **Checkpointing** (Phase 5): the agent loop persists its message state to
+  Postgres after every LLM round and tool boundary. A task killed mid-run
+  resumes from its last checkpoint on the next worker instead of restarting
+  from scratch. `make demo-distributed` shows both a dead-worker reassignment
+  and a checkpoint resume in the event timeline.
 
 The demo creates a `coder` agent against `./demo/repo`, which plans a
 branching DAG (`analyze → {implement ∥ docs} → test`), runs the parallel
@@ -142,6 +155,7 @@ internal/context       context builder: rank → compress → token budget
 internal/llm           Provider interface: Requesty + demo provider + embeddings
 internal/memory        three-tier memory: Redis (short), Postgres (long), vectors (semantic)
 internal/events        event bus: in-memory + NATS JetStream
+internal/checkpoint    task checkpointing at tool boundaries (Postgres)
 internal/store         postgres repositories + migrations
 internal/artifacts     first-class artifact store
 internal/runtime       shared worker-stack construction for both binaries
@@ -150,6 +164,5 @@ demo/repo              sample project used by the demos
 
 ## Roadmap
 
-Phase 5 checkpointing & hardened sandbox · Phase 6 Firecracker + Qdrant ·
-Phase 7 model router · Phase 8 evaluation · Phase 9 observability + execution
-graph UI · Phase 10 production features.
+Phase 6 Firecracker + Qdrant · Phase 7 model router · Phase 8 evaluation ·
+Phase 9 observability + execution graph UI · Phase 10 production features.

@@ -16,6 +16,12 @@ type DockerConfig struct {
 	MemMB   int
 	Network string // "none" or "bridge"
 	BaseDir string // host dir for temp repo mounts
+
+	// Hardening (Phase 5). Defaults applied in NewDockerSandbox.
+	ReadOnlyRoot bool   // read-only root filesystem + writable tmpfs
+	CapDropAll   bool   // drop all Linux capabilities
+	PidsLimit    int    // cap process count (fork-bomb containment)
+	RunAsUser    string // non-root user as "uid:gid"
 }
 
 type DockerSandbox struct {
@@ -25,6 +31,12 @@ type DockerSandbox struct {
 func NewDockerSandbox(cfg DockerConfig) *DockerSandbox {
 	if cfg.BaseDir == "" {
 		cfg.BaseDir = filepath.Join(os.TempDir(), "kubeai-sandbox")
+	}
+	if cfg.PidsLimit <= 0 {
+		cfg.PidsLimit = 256
+	}
+	if cfg.RunAsUser == "" {
+		cfg.RunAsUser = "1000:1000"
 	}
 	return &DockerSandbox{cfg: cfg}
 }
@@ -74,6 +86,21 @@ func (d *DockerSandbox) Prepare(ctx context.Context, repo *RepoSource) (Session,
 	if d.cfg.MemMB > 0 {
 		createArgs = append(createArgs, "--memory", fmt.Sprintf("%dm", d.cfg.MemMB))
 	}
+	// Hardening: read-only root with a writable tmpfs, no capabilities, no
+	// new privileges, a non-root user, and a process-count cap.
+	if d.cfg.ReadOnlyRoot {
+		createArgs = append(createArgs, "--read-only", "--tmpfs", "/tmp:rw,size=512m,mode=1777")
+		createArgs = append(createArgs, "-e", "HOME=/tmp/home", "-e", "GOCACHE=/tmp/gocache")
+	}
+	if d.cfg.CapDropAll {
+		createArgs = append(createArgs, "--cap-drop", "ALL", "--security-opt", "no-new-privileges")
+	}
+	if d.cfg.PidsLimit > 0 {
+		createArgs = append(createArgs, "--pids-limit", fmt.Sprintf("%d", d.cfg.PidsLimit))
+	}
+	if d.cfg.RunAsUser != "" {
+		createArgs = append(createArgs, "--user", d.cfg.RunAsUser)
+	}
 	createArgs = append(createArgs, d.cfg.Image, "sleep", "infinity")
 	if _, err := docker(createArgs...); err != nil {
 		return nil, fmt.Errorf("create sandbox container: %w", err)
@@ -81,6 +108,11 @@ func (d *DockerSandbox) Prepare(ctx context.Context, repo *RepoSource) (Session,
 	if _, err := docker("start", s.name); err != nil {
 		_, _ = docker("rm", "-f", s.name)
 		return nil, fmt.Errorf("start sandbox container: %w", err)
+	}
+	if d.cfg.ReadOnlyRoot {
+		// Ensure writable home/build-cache dirs exist for the non-root user.
+		_, _ = docker("exec", s.name, "/bin/sh", "-c",
+			"mkdir -p /tmp/home /tmp/gocache && chown -R "+d.cfg.RunAsUser+" /tmp/home /tmp/gocache 2>/dev/null || true")
 	}
 	return s, nil
 }
