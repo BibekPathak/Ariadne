@@ -31,6 +31,17 @@ type Config struct {
 	SandboxPidsLimit int
 	SandboxUser      string
 
+	SandboxRuntime string // docker | firecracker
+
+	FirecrackerBinary  string
+	FirecrackerKernel  string
+	FirecrackerRootFS  string
+	FirecrackerWorkDir string
+	FirecrackerPool    int
+	FirecrackerPort    int
+	FirecrackerVCPU    int
+	FirecrackerMemMiB  int
+
 	SandboxImage   string
 	SandboxCPU     string
 	SandboxMemMB   int
@@ -64,20 +75,31 @@ func Load() Config {
 
 		CheckpointEnabled: getBool("CHECKPOINT_ENABLED", true),
 
-		SandboxReadOnly:   getBool("SANDBOX_READ_ONLY", true),
-		SandboxCapDrop:    getBool("SANDBOX_CAP_DROP", true),
-		SandboxPidsLimit:  getInt("SANDBOX_PIDS_LIMIT", 256),
-		SandboxUser:       get("SANDBOX_USER", "1000:1000"),
-		SandboxImage:      get("SANDBOX_IMAGE", "kubeai-sandbox:local"),
-		SandboxCPU:        get("SANDBOX_CPU", "1"),
-		SandboxMemMB:      getInt("SANDBOX_MEM_MB", 1024),
-		SandboxNetwork:    get("SANDBOX_NETWORK", "none"),
-		ArtifactsDir:      get("ARTIFACTS_DIR", "./artifacts"),
-		RepoBaseDir:       get("REPO_BASE_DIR", "/tmp/kubeai-repos"),
-		DemoRepoPath:      get("DEMO_REPO_PATH", "./demo/repo"),
-		MaxIterations:     getInt("MAX_ITERATIONS", 25),
-		Timeout:           time.Duration(getInt("AGENT_TIMEOUT_MIN", 30)) * time.Minute,
-		EngineConcurrency: getInt("ENGINE_CONCURRENCY", 4),
+		SandboxReadOnly:  getBool("SANDBOX_READ_ONLY", true),
+		SandboxCapDrop:   getBool("SANDBOX_CAP_DROP", true),
+		SandboxPidsLimit: getInt("SANDBOX_PIDS_LIMIT", 256),
+		SandboxUser:      get("SANDBOX_USER", "1000:1000"),
+
+		SandboxRuntime: get("SANDBOX_RUNTIME", "docker"),
+
+		FirecrackerBinary:  get("FIRECRACKER_BINARY", "./deploy/firecracker/firecracker"),
+		FirecrackerKernel:  get("FIRECRACKER_KERNEL", "./deploy/firecracker/vmlinux.bin"),
+		FirecrackerRootFS:  get("FIRECRACKER_ROOTFS", "./deploy/firecracker/rootfs.ext4"),
+		FirecrackerWorkDir: get("FIRECRACKER_WORKDIR", "./data/firecracker"),
+		FirecrackerPool:    getInt("FIRECRACKER_POOL", 1),
+		FirecrackerPort:    getInt("FIRECRACKER_PORT", 5200),
+		FirecrackerVCPU:    getInt("FIRECRACKER_VCPU", 2),
+		FirecrackerMemMiB:  getInt("FIRECRACKER_MEM_MIB", 1024),
+		SandboxImage:       get("SANDBOX_IMAGE", "kubeai-sandbox:local"),
+		SandboxCPU:         get("SANDBOX_CPU", "1"),
+		SandboxMemMB:       getInt("SANDBOX_MEM_MB", 1024),
+		SandboxNetwork:     get("SANDBOX_NETWORK", "none"),
+		ArtifactsDir:       get("ARTIFACTS_DIR", "./artifacts"),
+		RepoBaseDir:        get("REPO_BASE_DIR", "/tmp/kubeai-repos"),
+		DemoRepoPath:       get("DEMO_REPO_PATH", "./demo/repo"),
+		MaxIterations:      getInt("MAX_ITERATIONS", 25),
+		Timeout:            time.Duration(getInt("AGENT_TIMEOUT_MIN", 30)) * time.Minute,
+		EngineConcurrency:  getInt("ENGINE_CONCURRENCY", 4),
 	}
 }
 

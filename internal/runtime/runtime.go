@@ -5,6 +5,7 @@ package runtime
 
 import (
 	"log/slog"
+	"time"
 
 	"adriane/internal/artifacts"
 	"adriane/internal/checkpoint"
@@ -42,18 +43,7 @@ func Build(cfg config.Config, st *store.Store, bus events.Publisher, logger *slo
 		tools.ShellTool{}, tools.GitTool{}, tools.HTTPGetTool{},
 	)
 	taskTemplates := tasks.NewRegistry()
-	sbox := sandbox.NewDockerSandbox(sandbox.DockerConfig{
-		Image:   cfg.SandboxImage,
-		CPU:     cfg.SandboxCPU,
-		MemMB:   cfg.SandboxMemMB,
-		Network: cfg.SandboxNetwork,
-		BaseDir: cfg.RepoBaseDir,
-
-		ReadOnlyRoot: cfg.SandboxReadOnly,
-		CapDropAll:   cfg.SandboxCapDrop,
-		PidsLimit:    cfg.SandboxPidsLimit,
-		RunAsUser:    cfg.SandboxUser,
-	})
+	sbox := sandboxFor(cfg, logger)
 
 	mem, useSemantic := buildMemory(cfg, st, provider, logger)
 
@@ -83,6 +73,38 @@ func providerFor(cfg config.Config, logger *slog.Logger) (llm.Provider, string) 
 		Name: "requesty", BaseURL: cfg.RequestyBase, APIKey: cfg.RequestyAPIKey,
 		Model: cfg.LLMModel, EmbeddingModel: cfg.EmbeddingModel,
 	}), cfg.LLMModel
+}
+
+func sandboxFor(cfg config.Config, logger *slog.Logger) sandbox.Sandbox {
+	switch cfg.SandboxRuntime {
+	case "firecracker":
+		sb := sandbox.NewFirecrackerSandbox(sandbox.FirecrackerConfig{
+			Binary:      cfg.FirecrackerBinary,
+			Kernel:      cfg.FirecrackerKernel,
+			RootFS:      cfg.FirecrackerRootFS,
+			WorkDir:     cfg.FirecrackerWorkDir,
+			VCPU:        cfg.FirecrackerVCPU,
+			MemMiB:      cfg.FirecrackerMemMiB,
+			Port:        cfg.FirecrackerPort,
+			PoolSize:    cfg.FirecrackerPool,
+			BootTimeout: 90 * time.Second,
+		}, logger)
+		logger.Info("sandbox runtime: firecracker", "kernel", cfg.FirecrackerKernel, "rootfs", cfg.FirecrackerRootFS)
+		return sb
+	default:
+		return sandbox.NewDockerSandbox(sandbox.DockerConfig{
+			Image:   cfg.SandboxImage,
+			CPU:     cfg.SandboxCPU,
+			MemMB:   cfg.SandboxMemMB,
+			Network: cfg.SandboxNetwork,
+			BaseDir: cfg.RepoBaseDir,
+
+			ReadOnlyRoot: cfg.SandboxReadOnly,
+			CapDropAll:   cfg.SandboxCapDrop,
+			PidsLimit:    cfg.SandboxPidsLimit,
+			RunAsUser:    cfg.SandboxUser,
+		})
+	}
 }
 
 func buildMemory(cfg config.Config, st *store.Store, provider llm.Provider, logger *slog.Logger) (memory.Memory, bool) {

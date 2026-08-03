@@ -5,3 +5,7 @@ demo/repo/.*
 *.log
 .idea/
 .vscode/
+data/
+deploy/firecracker/*.ext4
+deploy/firecracker/firecracker
+deploy/firecracker/vmlinux.bin

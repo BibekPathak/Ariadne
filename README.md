@@ -4,12 +4,13 @@ Kubernetes for AI agents: a distributed execution platform where agents are
 created, planned, scheduled, executed in isolated sandboxes, and replayable
 from an event-sourced log.
 
-This is **Phase 0-5** of a ten-phase roadmap: a distributed platform with
+This is **Phase 0-6** of a ten-phase roadmap: a distributed platform with
 persistent three-tier memory, a ranked/compressed context builder, parallel
-DAG execution, **remote workers over NATS** with dead-worker reassignment,
-**task checkpointing at tool boundaries**, and a **hardened Docker sandbox** —
-architected so the remaining phases (Firecracker, model router, evaluation,
-observability, production features) slot in behind existing interfaces.
+DAG execution, remote workers over NATS with dead-worker reassignment, task
+checkpointing, a hardened Docker sandbox, and a **Firecracker microVM
+runtime** with a warm-pool — architected so the remaining phases (model
+router, evaluation, observability, production features) slot in behind
+existing interfaces.
 
 ## Architecture
 
@@ -54,12 +55,28 @@ real Docker sandbox.
 
 ```bash
 docker compose up -d          # postgres + redis + nats
-make sandbox-image            # kubeai-sandbox:local
-make demo                     # embedded mode: single process, one agent run
+make sandbox-image            # kubeai-sandbox:local (docker runtime)
+make firecracker-rootfs       # deploy/firecracker/rootfs.ext4 (firecracker runtime)
+make demo                     # docker runtime, single process
 make demo-memory              # two runs: proves memory persists across runs
 make demo-distributed         # 3 remote workers over NATS; kills one mid-run
-                              # and shows the task being reassigned
+make demo-firecracker         # the same agent, executing inside microVMs
 ```
+
+## Sandbox runtimes
+
+`SANDBOX_RUNTIME` selects the execution backend behind the `sandbox.Sandbox`
+interface — the demo suite runs unchanged on either:
+
+- **`docker`** (default): hardened container per task (read-only rootfs,
+  no capabilities, non-root, pids limit).
+- **`firecracker`**: a microVM per task. Each VM boots from a kernel + an
+  ext4 rootfs built from the tooling image; a small `sandbox-agent` (PID 1)
+  serves exec/read/write/list over a vsock, and the host talks to it over the
+  Firecracker vsock bridge. A warm-pool pre-boots VMs (~1.4-2s to agent-ready)
+  so task startup is fast. Build the rootfs with `make firecracker-rootfs`
+  (`scripts/build-firecracker-rootfs.sh`); needs KVM. Verify with
+  `SANDBOX_TEST_FIRECRACKER=1 go test ./internal/sandbox/ -run Firecracker -v`.
 
 ## Modes
 
@@ -143,13 +160,14 @@ make migrate     # apply schema migrations
 ```
 cmd/api-gateway        control plane: REST + SSE, scheduler, workflow engine
 cmd/worker             standalone worker: claims NATS tasks, runs agent loop
+cmd/sandbox-agent      PID 1 inside Firecracker VMs: vsock exec/read/write/list
 internal/agents        agent templates + lifecycle orchestration
 internal/planner       goal → execution plan (LLM or static fallback)
 internal/workflow      compiler (plan → DAG) + DAG engine
 internal/scheduler     dispatch (embedded or NATS remote), retries, dead-worker detection
 internal/transport     stable NATS wire contract: TaskMessage/Result/Heartbeat
 internal/worker        agent loop: sandbox → LLM → tools → artifacts → memory
-internal/sandbox       Sandbox interface + Docker implementation
+internal/sandbox       Sandbox interface: Docker + Firecracker (microVM) runtimes
 internal/tools         tool registry: read/write/shell/git/http
 internal/context       context builder: rank → compress → token budget
 internal/llm           Provider interface: Requesty + demo provider + embeddings
@@ -164,5 +182,5 @@ demo/repo              sample project used by the demos
 
 ## Roadmap
 
-Phase 6 Firecracker + Qdrant · Phase 7 model router · Phase 8 evaluation ·
-Phase 9 observability + execution graph UI · Phase 10 production features.
+Phase 7 model router · Phase 8 evaluation · Phase 9 observability + execution
+graph UI · Phase 10 production features.
