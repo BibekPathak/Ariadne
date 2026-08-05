@@ -87,9 +87,11 @@ func (d *DockerSandbox) Prepare(ctx context.Context, repo *RepoSource) (Session,
 		createArgs = append(createArgs, "--memory", fmt.Sprintf("%dm", d.cfg.MemMB))
 	}
 	// Hardening: read-only root with a writable tmpfs, no capabilities, no
-	// new privileges, a non-root user, and a process-count cap.
+	// new privileges, a non-root user, and a process-count cap. The tmpfs
+	// must be exec-mount so toolchains can run binaries from /tmp (go test,
+	// compiled scripts); Docker's default tmpfs is noexec.
 	if d.cfg.ReadOnlyRoot {
-		createArgs = append(createArgs, "--read-only", "--tmpfs", "/tmp:rw,size=512m,mode=1777")
+		createArgs = append(createArgs, "--read-only", "--tmpfs", "/tmp:rw,exec,size=512m,mode=1777")
 		createArgs = append(createArgs, "-e", "HOME=/tmp/home", "-e", "GOCACHE=/tmp/gocache")
 	}
 	if d.cfg.CapDropAll {

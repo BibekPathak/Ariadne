@@ -65,6 +65,21 @@ func TestDockerHardeningContainment(t *testing.T) {
 		}
 	})
 
+	t.Run("tmpfs supports exec", func(t *testing.T) {
+		// Regression: Docker's default tmpfs is noexec, which broke running
+		// toolchain binaries (go test) from /tmp inside hardened sandboxes.
+		// Write via the shell (docker cp cannot reach tmpfs mounts in a
+		// read-only rootfs).
+		out, err := sess.Exec(ctx, "/bin/sh", "-c",
+			"printf '#!/bin/sh\\necho exec-ok\\n' > /tmp/execprobe.sh && chmod +x /tmp/execprobe.sh && /tmp/execprobe.sh")
+		if err != nil {
+			t.Fatalf("tmpfs should be exec-mountable: %v", err)
+		}
+		if !strings.Contains(out.Stdout, "exec-ok") {
+			t.Fatalf("unexpected output %q", out.Stdout)
+		}
+	})
+
 	t.Run("fork bomb is contained by pids limit", func(t *testing.T) {
 		out, _ := sess.Exec(ctx, "/bin/sh", "-c",
 			"for i in $(seq 1 2000); do sleep 60 & done; wait; echo survived")

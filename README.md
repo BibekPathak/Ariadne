@@ -4,13 +4,14 @@ Kubernetes for AI agents: a distributed execution platform where agents are
 created, planned, scheduled, executed in isolated sandboxes, and replayable
 from an event-sourced log.
 
-This is **Phase 0-7** of a ten-phase roadmap: a distributed platform with
+This is **Phase 0-8** of a ten-phase roadmap: a distributed platform with
 persistent three-tier memory, a ranked/compressed context builder, parallel
 DAG execution, remote workers over NATS with dead-worker reassignment, task
-checkpointing, hardened Docker + **Firecracker microVM** sandboxes, and a
-**policy-based model router** with cross-gateway failover — architected so the
-remaining phases (evaluation, observability, production features) slot in
-behind existing interfaces.
+checkpointing, hardened Docker + **Firecracker microVM** sandboxes, a
+policy-based **model router** with cross-gateway failover, and an
+**evaluation engine** with per-metric regression detection — architected so
+the remaining phases (observability, production features) slot in behind
+existing interfaces.
 
 ## Architecture
 
@@ -132,6 +133,26 @@ per-task outcomes in short-term (Redis), long-term (Postgres) and semantic
 (Go-native vector) memory; run 2 retrieves them and its transcript shows the
 recollections injected into the prompt.
 
+## Evaluation engine (Phase 8)
+
+`internal/eval` + `cmd/eval` is a batch harness that runs versioned suites of
+golden tasks (`eval/suites/v1/*.yaml`) across router arms and scores them
+from the event log: success/pass rate (rule-based `Judge` — must-succeed,
+file-exists, content-contains), latency, cost (`llm_called` tokens × per-tier
+pricing), and tool-error rate.
+
+- **`make eval`**: runs the suite across `fast,coding,reasoning`, writes
+  reproducible artifacts under `evals/<run-id>/` (`leaderboard.json`,
+  `results.json`, `metrics.csv`, `summary.md`), then re-runs with an
+  impossible check to demonstrate **regression detection**.
+- **Regression**: per-metric thresholds (success drop, latency/cost/tool-error
+  increases) compared against the previous run of the same suite+arm; a breach
+  exits non-zero.
+- Every run records suite version, git SHA, and arm. Offline, all arms share
+  the mock provider; with real `ROUTER_*_MODEL` IDs the leaderboard
+  differentiates models. The `Judge` interface is the seam for LLM/human
+  judges later.
+
 ## Running with a real LLM (Requesty)
 
 ```bash
@@ -198,10 +219,12 @@ internal/checkpoint    task checkpointing at tool boundaries (Postgres)
 internal/store         postgres repositories + migrations
 internal/artifacts     first-class artifact store
 internal/runtime       shared worker-stack construction for both binaries
+internal/controlplane  shared control-plane assembly (API + eval)
+internal/eval          evaluation engine: suites, judges, scoring, regression
 demo/repo              sample project used by the demos
+eval/suites            versioned golden-task suites
 ```
 
 ## Roadmap
 
-Phase 8 evaluation · Phase 9 observability + execution graph UI · Phase 10
-production features.
+Phase 9 observability + execution graph UI · Phase 10 production features.

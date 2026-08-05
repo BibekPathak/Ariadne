@@ -27,6 +27,9 @@ type CreateRequest struct {
 	Goal     string `json:"goal"`
 	RepoURL  string `json:"repo_url"`
 	RepoPath string `json:"repo_path"`
+	// Tier pins every task of this agent to a router tier (fast/coding/
+	// reasoning); empty lets the task characteristics decide.
+	Tier string `json:"tier,omitempty"`
 }
 
 // AgentService is the control-plane orchestrator: it owns the agent lifecycle
@@ -76,6 +79,9 @@ func (a *AgentService) Create(ctx context.Context, req CreateRequest) (*store.Ag
 			"plan":        tpl.DefaultPlan,
 		},
 	}
+	if req.Tier != "" {
+		agent.Meta["tier"] = req.Tier
+	}
 	if err := a.store.Agents.Create(ctx, agent); err != nil {
 		return nil, fmt.Errorf("create agent: %w", err)
 	}
@@ -119,6 +125,9 @@ func (a *AgentService) Run(ctx context.Context, agentID string) error {
 		plan.Tasks[i].Inputs["repo_url"] = agent.RepoURL
 		plan.Tasks[i].Inputs["repo_path"] = agent.RepoPath
 		plan.Tasks[i].Inputs["goal"] = agent.Goal
+		if tier, ok := agent.Meta["tier"].(string); ok && tier != "" {
+			plan.Tasks[i].Inputs["tier"] = tier
+		}
 	}
 
 	dag, err := a.compiler.Compile(agent.ID, newRunID(), plan)

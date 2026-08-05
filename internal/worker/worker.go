@@ -191,7 +191,7 @@ func (w *Worker) runAgentLoop(ctx context.Context, node *workflow.Node, tpl task
 		})
 		req.Tools = toolDefs
 
-		resp, route, err := w.router.GenerateRoute(ctx, *req, routeFor(tpl, goal), router.WorkerPolicy())
+		resp, route, err := w.router.GenerateRoute(ctx, *req, routeForTask(node, tpl, goal), router.WorkerPolicy())
 		if err != nil {
 			return nil, transcript, fmt.Errorf("llm call: %w", err)
 		}

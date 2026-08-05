@@ -1,8 +1,9 @@
-.PHONY: run test demo demo-memory demo-distributed demo-firecracker migrate lint tidy build sandbox-image firecracker-rootfs
+.PHONY: run test demo demo-memory demo-distributed demo-firecracker eval migrate lint tidy build sandbox-image firecracker-rootfs
 
 build:
 	go build -o bin/kubeai ./cmd/api-gateway
 	go build -o bin/kubeai-worker ./cmd/worker
+	go build -o bin/kubeai-eval ./cmd/eval
 
 sandbox-image:
 	docker build -t kubeai-sandbox:local -f deploy/sandbox.Dockerfile .
@@ -36,6 +37,9 @@ demo-distributed: up build
 
 demo-firecracker: build
 	./scripts/demo-firecracker.sh
+
+eval: up build
+	./scripts/demo-eval.sh
 
 lint:
 	go vet ./...

@@ -18,6 +18,8 @@ type Store struct {
 	Artifacts   *ArtifactsRepo
 	Memories    *MemoryRepo
 	Checkpoints *CheckpointRepo
+	EvalRuns    *EvalRunsRepo
+	EvalResults *EvalResultsRepo
 }
 
 func New(ctx context.Context, databaseURL string) (*Store, error) {
@@ -35,6 +37,8 @@ func New(ctx context.Context, databaseURL string) (*Store, error) {
 	s.Artifacts = &ArtifactsRepo{pool: pool}
 	s.Memories = &MemoryRepo{pool: pool}
 	s.Checkpoints = &CheckpointRepo{pool: pool}
+	s.EvalRuns = &EvalRunsRepo{pool: pool}
+	s.EvalResults = &EvalResultsRepo{pool: pool}
 	return s, nil
 }
 

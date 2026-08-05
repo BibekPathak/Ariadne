@@ -1,0 +1,38 @@
+name: coder-basic
+version: 1
+description: Core coding-agent capability on the demo repository.
+thresholds:
+  success_drop_percent: 10
+  latency_increase_percent: 20
+  cost_increase_percent: 30
+  tool_errors_increase_percent: 10
+tasks:
+  - name: add-subtract
+    template: coder
+    goal: |
+      In the mathx package, add a Subtract(a, b int) int function and a
+      passing test TestSubtract that checks Subtract(5,3) == 2. Then run the
+      full test suite.
+    repo: ./demo/repo
+    expected:
+      must_succeed: true
+      files:
+        - mathx/mathx.go
+        - mathx/mathx_test.go
+      contains:
+        - "func Subtract"
+    timeout_sec: 240
+
+  - name: write-docs
+    template: coder
+    goal: |
+      Write a README.md documenting this Go project, including that it is a
+      sample used by the Adriane agent platform.
+    repo: ./demo/repo
+    expected:
+      must_succeed: true
+      files:
+        - README.md
+      contains:
+        - "Adriane"
+    timeout_sec: 240
