@@ -38,7 +38,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           routes(cp.Agent, cp.Bus, cfg.Timeout, logger),
+		Handler:           routes(cp.Agent, cp.Bus, cfg.Timeout, logger, cp.Stack.Metrics.Handler()),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	logger.Info("control plane listening", "addr", cfg.HTTPAddr, "worker_mode", cfg.WorkerMode)

@@ -73,7 +73,7 @@ func TestEngineRunsIndependentNodesConcurrently(t *testing.T) {
 	ns := newMemStore()
 	bus := events.NewInMemoryBus(nil)
 	defer bus.Close()
-	e := NewEngine(ns, bus, slog.New(slog.DiscardHandler), 2)
+	e := NewEngine(ns, bus, slog.New(slog.DiscardHandler), 2, nil)
 
 	exec := newBarrierExecutor()
 	dag := &DAG{AgentID: "a", Nodes: []*Node{
@@ -121,7 +121,7 @@ func TestEnginePartialFailureBlocksDownstream(t *testing.T) {
 	ns := newMemStore()
 	bus := events.NewInMemoryBus(nil)
 	defer bus.Close()
-	e := NewEngine(ns, bus, slog.New(slog.DiscardHandler), 2)
+	e := NewEngine(ns, bus, slog.New(slog.DiscardHandler), 2, nil)
 
 	dag := &DAG{AgentID: "a", Nodes: []*Node{
 		{ID: "a_root", AgentID: "a", Name: "root", Status: StatusPending, MaxAttempt: 1},

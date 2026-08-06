@@ -7,6 +7,8 @@ demo/repo/.*
 .vscode/
 data/
 evals/
+dashboard/node_modules/
+dashboard/.next/
 deploy/firecracker/*.ext4
 deploy/firecracker/firecracker
 deploy/firecracker/vmlinux.bin

@@ -10,6 +10,7 @@ import (
 	"adriane/internal/config"
 	"adriane/internal/controlplane"
 	"adriane/internal/eval"
+	"adriane/internal/router"
 	"adriane/internal/store"
 )
 
@@ -43,7 +44,7 @@ func main() {
 	}
 	defer cp.Close()
 
-	pricing := eval.DefaultPricing()
+	pricing := router.DefaultPricing()
 	var rows []eval.LeaderboardRow
 	regressionAny := false
 

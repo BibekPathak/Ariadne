@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"adriane/internal/events"
+	"adriane/internal/obs"
 	"adriane/internal/workflow"
 )
 
@@ -41,19 +42,20 @@ type Scheduler struct {
 	bus       events.EventBus
 	logger    *slog.Logger
 	worker    Worker
+	metrics   *obs.Metrics
 	mu        sync.Mutex
 	workers   map[string]*workerRecord
 	currentID string
 }
 
-func NewScheduler(bus events.EventBus, worker Worker, logger *slog.Logger, size int) *Scheduler {
+func NewScheduler(bus events.EventBus, worker Worker, logger *slog.Logger, size int, metrics *obs.Metrics) *Scheduler {
 	if size <= 0 {
 		size = 1
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	s := &Scheduler{bus: bus, logger: logger, worker: worker, workers: map[string]*workerRecord{}}
+	s := &Scheduler{bus: bus, logger: logger, worker: worker, metrics: metrics, workers: map[string]*workerRecord{}}
 	for i := 1; i <= size; i++ {
 		s.registerWorker(fmt.Sprintf("worker-%d", i))
 	}
@@ -66,6 +68,10 @@ func (s *Scheduler) registerWorker(id string) {
 
 // Execute implements workflow.TaskExecutor.
 func (s *Scheduler) Execute(ctx context.Context, node *workflow.Node) (map[string]any, error) {
+	if s.metrics != nil {
+		s.metrics.QueueDepth.Inc()
+		defer s.metrics.QueueDepth.Dec()
+	}
 	rec, err := s.reserve()
 	if err != nil {
 		return nil, err
@@ -73,11 +79,15 @@ func (s *Scheduler) Execute(ctx context.Context, node *workflow.Node) (map[strin
 	defer func() {
 		rec.state = WorkerCompleted
 		rec.state = WorkerIdle
+		s.updateUtilization()
 	}()
 
 	var lastErr error
 	for attempt := 1; attempt <= node.MaxAttempt; attempt++ {
 		if attempt > 1 {
+			if s.metrics != nil {
+				s.metrics.Retries.Inc()
+			}
 			_ = s.bus.Publish(ctx, events.New(node.AgentID, node.ID, events.RetryScheduled, map[string]any{
 				"attempt": attempt,
 				"max":     node.MaxAttempt,
@@ -86,6 +96,7 @@ func (s *Scheduler) Execute(ctx context.Context, node *workflow.Node) (map[strin
 			s.logger.Warn("retrying task", "task", node.ID, "attempt", attempt, "err", lastErr)
 		}
 		rec.state = WorkerRunning
+		s.updateUtilization()
 		outputs, err := s.worker.Run(ctx, node)
 		if err == nil {
 			return outputs, nil
@@ -93,6 +104,25 @@ func (s *Scheduler) Execute(ctx context.Context, node *workflow.Node) (map[strin
 		lastErr = err
 	}
 	return nil, fmt.Errorf("task %s failed after %d attempts: %w", node.ID, node.MaxAttempt, lastErr)
+}
+
+// updateUtilization publishes the fraction of worker slots currently running.
+func (s *Scheduler) updateUtilization() {
+	if s.metrics == nil {
+		return
+	}
+	s.mu.Lock()
+	total := len(s.workers)
+	running := 0
+	for _, w := range s.workers {
+		if w.state == WorkerRunning {
+			running++
+		}
+	}
+	s.mu.Unlock()
+	if total > 0 {
+		s.metrics.WorkerUtilization.WithLabelValues("running").Set(float64(running) / float64(total))
+	}
 }
 
 func (s *Scheduler) reserve() (*workerRecord, error) {

@@ -26,6 +26,17 @@ func (r *ArtifactsRepo) Create(ctx context.Context, a *Artifact) error {
 	return err
 }
 
+func (r *ArtifactsRepo) Get(ctx context.Context, id string) (*Artifact, error) {
+	row := r.pool.QueryRow(ctx,
+		`SELECT id, agent_id, task_id, type, path, size, created_at FROM artifacts WHERE id=$1`, id)
+	var a Artifact
+	err := row.Scan(&a.ID, &a.AgentID, &a.TaskID, &a.Type, &a.Path, &a.Size, &a.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
 func (r *ArtifactsRepo) ListByAgent(ctx context.Context, agentID string) ([]*Artifact, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT id, agent_id, task_id, type, path, size, created_at FROM artifacts WHERE agent_id=$1 ORDER BY created_at`,

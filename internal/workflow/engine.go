@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"adriane/internal/events"
+	"adriane/internal/obs"
 	"adriane/internal/store"
 )
 
@@ -26,16 +28,21 @@ type Engine struct {
 	bus     events.EventBus
 	logger  *slog.Logger
 	workers int
+	metrics *obs.Metrics
+
+	widthMu    sync.Mutex
+	widthN     int
+	widthAccum float64
 }
 
-func NewEngine(ns NodeStore, bus events.EventBus, logger *slog.Logger, workers int) *Engine {
+func NewEngine(ns NodeStore, bus events.EventBus, logger *slog.Logger, workers int, metrics *obs.Metrics) *Engine {
 	if workers <= 0 {
 		workers = 1
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Engine{store: ns, bus: bus, logger: logger, workers: workers}
+	return &Engine{store: ns, bus: bus, logger: logger, workers: workers, metrics: metrics}
 }
 
 func (e *Engine) Run(ctx context.Context, dag *DAG, executor TaskExecutor) error {
@@ -56,6 +63,7 @@ func (e *Engine) Run(ctx context.Context, dag *DAG, executor TaskExecutor) error
 			break
 		}
 		for _, n := range ready {
+			e.observeWidth(len(ready))
 			n.Status = StatusRunning
 			if err := e.store.UpdateStatus(ctx, n.ID, string(StatusRunning), ""); err != nil {
 				return err
@@ -80,11 +88,26 @@ func (e *Engine) Run(ctx context.Context, dag *DAG, executor TaskExecutor) error
 	return nil
 }
 
+func (e *Engine) observeWidth(n int) {
+	if e.metrics == nil {
+		return
+	}
+	e.widthMu.Lock()
+	e.widthN++
+	e.widthAccum += float64(n)
+	avg := e.widthAccum / float64(e.widthN)
+	e.widthMu.Unlock()
+	e.metrics.DagWidthAvg.Set(avg)
+}
+
 // persistBlocked writes blocked status for nodes that could not run because a
 // dependency failed.
 func (e *Engine) persistBlocked(ctx context.Context, dag *DAG) error {
 	for _, n := range dag.Nodes {
 		if n.Status == StatusBlocked {
+			if e.metrics != nil {
+				e.metrics.TasksBlocked.Inc()
+			}
 			if err := e.store.UpdateStatus(ctx, n.ID, string(StatusBlocked), "dependency failed"); err != nil {
 				return err
 			}
@@ -94,15 +117,22 @@ func (e *Engine) persistBlocked(ctx context.Context, dag *DAG) error {
 }
 
 func (e *Engine) executeNode(ctx context.Context, n *Node, executor TaskExecutor) {
+	start := time.Now()
 	if err := e.store.IncAttempt(ctx, n.ID); err != nil {
 		e.logger.Error("increment attempt", "task", n.ID, "err", err)
 	}
 	n.Attempt++
 
 	outputs, err := executor.Execute(ctx, n)
+	if e.metrics != nil {
+		e.metrics.TaskDuration.Observe(time.Since(start).Seconds())
+	}
 	if err != nil {
 		n.Status = StatusFailed
 		n.Error = err.Error()
+		if e.metrics != nil {
+			e.metrics.TasksFailed.Inc()
+		}
 		if eerr := e.store.UpdateStatus(ctx, n.ID, string(StatusFailed), n.Error); eerr != nil {
 			e.logger.Error("persist task failure", "task", n.ID, "err", eerr)
 		}
@@ -111,6 +141,9 @@ func (e *Engine) executeNode(ctx context.Context, n *Node, executor TaskExecutor
 	}
 	n.Status = StatusDone
 	n.Outputs = outputs
+	if e.metrics != nil {
+		e.metrics.TasksSucceeded.Inc()
+	}
 	if eerr := e.store.UpdateOutputs(ctx, n.ID, outputs); eerr != nil {
 		e.logger.Error("persist outputs", "task", n.ID, "err", eerr)
 	}

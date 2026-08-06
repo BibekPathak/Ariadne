@@ -1,4 +1,4 @@
-.PHONY: run test demo demo-memory demo-distributed demo-firecracker eval migrate lint tidy build sandbox-image firecracker-rootfs
+.PHONY: run test demo demo-memory demo-distributed demo-firecracker eval dashboard migrate lint tidy build sandbox-image firecracker-rootfs
 
 build:
 	go build -o bin/kubeai ./cmd/api-gateway
@@ -40,6 +40,9 @@ demo-firecracker: build
 
 eval: up build
 	./scripts/demo-eval.sh
+
+dashboard:
+	cd dashboard && npm install && npm run dev
 
 lint:
 	go vet ./...

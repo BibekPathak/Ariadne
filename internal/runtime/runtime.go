@@ -14,6 +14,7 @@ import (
 	"adriane/internal/events"
 	"adriane/internal/llm"
 	"adriane/internal/memory"
+	"adriane/internal/obs"
 	"adriane/internal/router"
 	"adriane/internal/sandbox"
 	"adriane/internal/store"
@@ -28,6 +29,7 @@ type Stack struct {
 	TaskTemplates *tasks.Registry
 	Worker        *worker.Worker
 	Memory        memory.Memory
+	Metrics       *obs.Metrics
 }
 
 // Build constructs the worker stack. bus is the event publisher the worker
@@ -38,7 +40,8 @@ func Build(cfg config.Config, st *store.Store, bus events.Publisher, logger *slo
 		return nil, err
 	}
 
-	rtr := buildRouter(cfg, logger)
+	metrics := obs.New()
+	rtr := buildRouter(cfg, logger, metrics)
 	toolRegistry := tools.NewRegistry(
 		tools.ReadFileTool{}, tools.WriteFileTool{}, tools.ListFilesTool{},
 		tools.ShellTool{}, tools.GitTool{}, tools.HTTPGetTool{},
@@ -60,12 +63,13 @@ func Build(cfg config.Config, st *store.Store, bus events.Publisher, logger *slo
 		Memory:        mem,
 		UseSemantic:   useSemantic,
 		Checkpoints:   cps,
+		Metrics:       metrics,
 	}, rtr, toolRegistry, taskTemplates, ctxbuilder.New(), arts, bus, logger)
 
-	return &Stack{Router: rtr, Provider: rtr, TaskTemplates: taskTemplates, Worker: w, Memory: mem}, nil
+	return &Stack{Router: rtr, Provider: rtr, TaskTemplates: taskTemplates, Worker: w, Memory: mem, Metrics: metrics}, nil
 }
 
-func buildRouter(cfg config.Config, logger *slog.Logger) *router.Router {
+func buildRouter(cfg config.Config, logger *slog.Logger, metrics *obs.Metrics) *router.Router {
 	if cfg.RouterPrimaryKey == "" {
 		logger.Warn("no ROUTER_PRIMARY_API_KEY set; using demo provider (offline mode)")
 	}
@@ -80,6 +84,7 @@ func buildRouter(cfg config.Config, logger *slog.Logger) *router.Router {
 		FallbackKey:    cfg.RouterFallbackKey,
 		EmbeddingModel: cfg.EmbeddingModel,
 		DefaultPolicy:  router.PlannerPolicy(),
+		Metrics:        metrics,
 	})
 	if cfg.RouterFallbackKey != "" {
 		logger.Info("model router", "fallback", cfg.RouterFallbackURL)

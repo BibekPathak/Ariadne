@@ -29,7 +29,7 @@ func TestSchedulerRetriesThenSucceeds(t *testing.T) {
 	bus := events.NewInMemoryBus(nil)
 	defer bus.Close()
 	w := &fakeWorker{failFirst: true}
-	s := NewScheduler(bus, w, slog.New(slog.DiscardHandler), 1)
+	s := NewScheduler(bus, w, slog.New(slog.DiscardHandler), 1, nil)
 
 	node := &workflow.Node{AgentID: "a", ID: "t1", MaxAttempt: 3}
 	out, err := s.Execute(context.Background(), node)
@@ -48,7 +48,7 @@ func TestSchedulerFailsAfterMaxAttempts(t *testing.T) {
 	bus := events.NewInMemoryBus(nil)
 	defer bus.Close()
 	w2 := &alwaysFail{}
-	s := NewScheduler(bus, w2, slog.New(slog.DiscardHandler), 1)
+	s := NewScheduler(bus, w2, slog.New(slog.DiscardHandler), 1, nil)
 
 	node := &workflow.Node{AgentID: "a", ID: "t1", MaxAttempt: 2}
 	if _, err := s.Execute(context.Background(), node); err == nil {
@@ -63,7 +63,7 @@ func TestSchedulerConcurrentDispatch(t *testing.T) {
 	bus := events.NewInMemoryBus(nil)
 	defer bus.Close()
 	w := &fakeWorker{}
-	s := NewScheduler(bus, w, slog.New(slog.DiscardHandler), 2)
+	s := NewScheduler(bus, w, slog.New(slog.DiscardHandler), 2, nil)
 
 	var wg sync.WaitGroup
 	errs := make(chan error, 2)

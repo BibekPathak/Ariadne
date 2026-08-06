@@ -16,6 +16,7 @@ import (
 	"adriane/internal/events"
 	"adriane/internal/llm"
 	"adriane/internal/memory"
+	"adriane/internal/obs"
 	"adriane/internal/router"
 	"adriane/internal/sandbox"
 	"adriane/internal/tasks"
@@ -30,6 +31,8 @@ type Config struct {
 	Memory        memory.Memory // optional; nil disables memory
 	UseSemantic   bool
 	Checkpoints   checkpoint.Store // optional; nil disables checkpointing
+	Metrics       *obs.Metrics
+	WorkerID      string // reported in task_started events
 }
 
 // Worker executes a single node: it prepares an isolated sandbox, loads the
@@ -48,6 +51,8 @@ type Worker struct {
 	memory      memory.Memory
 	useSemantic bool
 	checkpoints checkpoint.Store
+	metrics     *obs.Metrics
+	workerID    string
 }
 
 func New(cfg Config, rtr *router.Router, registry *tools.Registry,
@@ -59,10 +64,18 @@ func New(cfg Config, rtr *router.Router, registry *tools.Registry,
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if cfg.WorkerID == "" {
+		cfg.WorkerID = "embedded"
+	}
 	return &Worker{cfg: cfg, router: rtr, registry: registry,
 		templates: templates, context: ctxBuilder, artifacts: arts, bus: bus, logger: logger,
-		memory: cfg.Memory, useSemantic: cfg.UseSemantic, checkpoints: cfg.Checkpoints}
+		memory: cfg.Memory, useSemantic: cfg.UseSemantic, checkpoints: cfg.Checkpoints,
+		metrics: cfg.Metrics, workerID: cfg.WorkerID}
 }
+
+// SetWorkerID overrides the id reported in task_started events (used by the
+// standalone worker binary, whose id is generated at startup).
+func (w *Worker) SetWorkerID(id string) { w.workerID = id }
 
 func (w *Worker) Run(ctx context.Context, node *workflow.Node) (map[string]any, error) {
 	tpl, ok := w.templates.Get(node.Template)
@@ -71,7 +84,7 @@ func (w *Worker) Run(ctx context.Context, node *workflow.Node) (map[string]any, 
 	}
 
 	if err := w.bus.Publish(ctx, events.New(node.AgentID, node.ID, events.TaskStarted, map[string]any{
-		"name": node.Name, "template": node.Template,
+		"name": node.Name, "template": node.Template, "worker": w.workerID,
 	})); err != nil {
 		return nil, err
 	}
@@ -86,7 +99,11 @@ func (w *Worker) Run(ctx context.Context, node *workflow.Node) (map[string]any, 
 	}
 	defer cleanup()
 
+	startPrep := time.Now()
 	session, err := w.cfg.Sandbox.Prepare(ctx, &sandbox.RepoSource{LocalPath: repoHost})
+	if w.metrics != nil {
+		w.metrics.SandboxStartup.Observe(time.Since(startPrep).Seconds())
+	}
 	if err != nil {
 		_ = w.bus.Publish(ctx, events.New(node.AgentID, node.ID, events.TaskFailed, map[string]any{"error": err.Error()}))
 		return nil, fmt.Errorf("prepare sandbox: %w", err)
@@ -96,7 +113,11 @@ func (w *Worker) Run(ctx context.Context, node *workflow.Node) (map[string]any, 
 	// Idempotent git identity so the agent can commit if asked to.
 	_, _ = session.ExecShell(ctx, "git config --global user.email agent@kubeai.local && git config --global user.name kubeai-agent")
 
+	startMem := time.Now()
 	recalled := w.loadMemory(ctx, node)
+	if w.metrics != nil {
+		w.metrics.MemoryRetrieval.Observe(time.Since(startMem).Seconds())
+	}
 
 	outputs, transcript, err := w.runAgentLoop(ctx, node, tpl, session, recalled)
 	w.saveTranscript(ctx, node, transcript)
@@ -229,6 +250,9 @@ func (w *Worker) runAgentLoop(ctx context.Context, node *workflow.Node, tpl task
 			result, err := w.registry.Execute(ctx, tc.Function.Name, args, ec)
 			if err != nil {
 				result = result + "\n[ERROR] " + err.Error()
+				if w.metrics != nil {
+					w.metrics.ToolErrors.Inc()
+				}
 			}
 			_ = w.bus.Publish(ctx, events.New(node.AgentID, node.ID, events.ToolFinished, map[string]any{
 				"tool": tc.Function.Name, "error": err != nil,
@@ -271,5 +295,7 @@ func (w *Worker) saveTranscript(ctx context.Context, node *workflow.Node, transc
 		return
 	}
 	ts := time.Now().UTC().Format("20060102T150405Z")
-	_, _ = w.artifacts.Save(ctx, node.AgentID, node.ID, "log", "transcript_"+ts+".json", raw)
+	if _, err := w.artifacts.Save(ctx, node.AgentID, node.ID, "log", "transcript_"+ts+".json", raw); err == nil && w.metrics != nil {
+		w.metrics.Artifacts.Inc()
+	}
 }

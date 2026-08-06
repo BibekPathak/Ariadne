@@ -6,21 +6,6 @@ import (
 	"adriane/internal/events"
 )
 
-// Pricing maps a router tier to a blended cost per 1000 tokens. Placeholder
-// values; tune in deployment.
-type Pricing map[string]float64
-
-func DefaultPricing() Pricing {
-	return Pricing{"fast": 0.001, "coding": 0.003, "reasoning": 0.01}
-}
-
-func (p Pricing) PricePer1k(tier string) float64 {
-	if v, ok := p[tier]; ok {
-		return v
-	}
-	return p["coding"]
-}
-
 // Metrics aggregates an agent run's cost/latency/reliability from its events.
 type Metrics struct {
 	LatencyMs  int64

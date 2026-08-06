@@ -4,14 +4,13 @@ Kubernetes for AI agents: a distributed execution platform where agents are
 created, planned, scheduled, executed in isolated sandboxes, and replayable
 from an event-sourced log.
 
-This is **Phase 0-8** of a ten-phase roadmap: a distributed platform with
+This is **Phase 0-9** of a ten-phase roadmap: a distributed platform with
 persistent three-tier memory, a ranked/compressed context builder, parallel
 DAG execution, remote workers over NATS with dead-worker reassignment, task
 checkpointing, hardened Docker + **Firecracker microVM** sandboxes, a
-policy-based **model router** with cross-gateway failover, and an
-**evaluation engine** with per-metric regression detection — architected so
-the remaining phases (observability, production features) slot in behind
-existing interfaces.
+policy-based **model router**, an **evaluation engine**, and **observability
+with a Run Explorer** dashboard — architected so the remaining phase
+(production features) slots in behind existing interfaces.
 
 ## Architecture
 
@@ -153,6 +152,32 @@ pricing), and tool-error rate.
   differentiates models. The `Judge` interface is the seam for LLM/human
   judges later.
 
+## Observability & Run Explorer (Phase 9)
+
+**Metrics** (`internal/obs`): the control plane exposes `GET /metrics`
+(Prometheus). Every subsystem emits where it happens — counters (agents,
+tasks by status, retries, tool errors, artifacts, LLM calls, tokens, cost),
+histograms (task duration, sandbox startup, memory retrieval, planner time,
+router decision), and gauges (worker utilization, queue depth, avg DAG
+width). `docker compose` includes a prometheus service that scrapes it;
+Grafana is deferred until there is enough history to justify dashboards.
+
+**Run Explorer** (`dashboard/` — Next.js App Router + React Flow, plain CSS):
+a dumb client that talks directly to the API gateway via REST + SSE. `make
+dashboard` starts it on :3000.
+
+- `/` — agents list with status/cost/latency.
+- `/agents/[id]` — the Run Explorer: the **execution graph** (DAG, status-
+  colored, live SSE updates), **replay controls** (▶ play / ⏸ pause / ⏮ step
+  back / ⏭ step forward + a timeline slider over event `seq`), a **task
+  details** panel (worker, model, tokens, cost, duration, tool calls,
+  retries, artifacts, transcript), a **critical path** view (longest real
+  duration), and an event log.
+
+The event-sourced timeline is the trace: it answers what ran, which tool, which
+model, how long, and how much it cost. OpenTelemetry is a later phase (events
+→ OTel spans → Tempo/Jaeger) without changing business logic.
+
 ## Running with a real LLM (Requesty)
 
 ```bash
@@ -221,10 +246,13 @@ internal/artifacts     first-class artifact store
 internal/runtime       shared worker-stack construction for both binaries
 internal/controlplane  shared control-plane assembly (API + eval)
 internal/eval          evaluation engine: suites, judges, scoring, regression
+internal/obs           Prometheus metrics registry + /metrics
+dashboard/             Run Explorer (Next.js + React Flow)
 demo/repo              sample project used by the demos
 eval/suites            versioned golden-task suites
 ```
 
 ## Roadmap
 
-Phase 9 observability + execution graph UI · Phase 10 production features.
+Phase 10 production features: multi-tenancy, RBAC, quotas, rate limiting,
+autoscaling, high availability.

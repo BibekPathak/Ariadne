@@ -17,16 +17,21 @@ type api struct {
 	bus        events.EventBus
 	logger     *slog.Logger
 	runTimeout time.Duration
+	metrics    http.Handler
 }
 
-func routes(svc *agents.AgentService, bus events.EventBus, runTimeout time.Duration, logger *slog.Logger) http.Handler {
-	a := &api{svc: svc, bus: bus, logger: logger, runTimeout: runTimeout}
+func routes(svc *agents.AgentService, bus events.EventBus, runTimeout time.Duration, logger *slog.Logger, metrics http.Handler) http.Handler {
+	a := &api{svc: svc, bus: bus, logger: logger, runTimeout: runTimeout, metrics: metrics}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	if metrics != nil {
+		mux.Handle("GET /metrics", metrics)
+	}
 	mux.HandleFunc("GET /templates", a.listTemplates)
+	mux.HandleFunc("GET /agents", a.listAgents)
 	mux.HandleFunc("POST /agents", a.createAgent)
 	mux.HandleFunc("GET /agents/{id}", a.getAgent)
 	mux.HandleFunc("POST /agents/{id}/run", a.rerunAgent)
@@ -34,8 +39,24 @@ func routes(svc *agents.AgentService, bus events.EventBus, runTimeout time.Durat
 	mux.HandleFunc("GET /agents/{id}/events", a.getEvents)
 	mux.HandleFunc("GET /agents/{id}/events/stream", a.streamEvents)
 	mux.HandleFunc("GET /agents/{id}/artifacts", a.getArtifacts)
+	mux.HandleFunc("GET /agents/{id}/artifacts/{artifactID}/content", a.getArtifactContent)
 
-	return logMiddleware(mux, logger)
+	return corsMiddleware(logMiddleware(mux, logger))
+}
+
+// corsMiddleware permits the dashboard (browser origin) to call the API
+// directly. Dev-permissive; tighten before exposing the API publicly.
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func logMiddleware(next http.Handler, logger *slog.Logger) http.Handler {
@@ -48,6 +69,15 @@ func logMiddleware(next http.Handler, logger *slog.Logger) http.Handler {
 
 func (a *api) listTemplates(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"templates": a.svc.Templates()})
+}
+
+func (a *api) listAgents(w http.ResponseWriter, r *http.Request) {
+	agents, err := a.svc.List(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
 }
 
 func (a *api) createAgent(w http.ResponseWriter, r *http.Request) {
@@ -131,6 +161,16 @@ func (a *api) getArtifacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"artifacts": arts})
+}
+
+func (a *api) getArtifactContent(w http.ResponseWriter, r *http.Request) {
+	data, err := a.svc.ArtifactContent(r.Context(), r.PathValue("id"), r.PathValue("artifactID"))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(data)
 }
 
 // streamEvents replays the full event log then tails live updates via SSE.

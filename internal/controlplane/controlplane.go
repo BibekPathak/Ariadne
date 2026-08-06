@@ -82,10 +82,10 @@ func Build(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Contro
 		workerIf = dispatcher
 	}
 
-	sched := scheduler.NewScheduler(bus, workerIf, logger, cfg.EngineConcurrency)
+	sched := scheduler.NewScheduler(bus, workerIf, logger, cfg.EngineConcurrency, stack.Metrics)
 	compiler := workflow.NewCompiler(stack.TaskTemplates)
-	engine := workflow.NewEngine(st.Tasks, bus, logger, cfg.EngineConcurrency)
-	agentService := agents.NewAgentService(st, bus, agents.NewTemplateRegistry(), plannerIf, compiler, engine, sched, logger)
+	engine := workflow.NewEngine(st.Tasks, bus, logger, cfg.EngineConcurrency, stack.Metrics)
+	agentService := agents.NewAgentService(st, bus, agents.NewTemplateRegistry(), plannerIf, compiler, engine, sched, stack.Metrics, logger)
 
 	return &ControlPlane{
 		Store: st, Bus: bus, Stack: stack, Agent: agentService, Logger: logger, remoteBus: remoteBus,

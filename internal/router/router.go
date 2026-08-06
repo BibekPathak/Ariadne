@@ -13,7 +13,27 @@ import (
 	"time"
 
 	"adriane/internal/llm"
+	"adriane/internal/obs"
 )
+
+// Pricing maps a router tier to a blended cost per 1000 tokens. Placeholder
+// values; tune in deployment.
+type Pricing map[string]float64
+
+func DefaultPricing() Pricing {
+	return Pricing{"fast": 0.001, "coding": 0.003, "reasoning": 0.01}
+}
+
+func (p Pricing) PricePer1k(tier Tier) float64 {
+	if v, ok := p[string(tier)]; ok {
+		return v
+	}
+	return p["coding"]
+}
+
+func (p Pricing) Cost(tier Tier, tokens int) float64 {
+	return float64(tokens) / 1000.0 * p.PricePer1k(tier)
+}
 
 type Tier string
 
@@ -77,6 +97,8 @@ type Router struct {
 	tierModel     map[Tier]string
 	defaultModel  string
 	defaultPolicy Policy
+	metrics       *obs.Metrics
+	pricing       Pricing
 }
 
 type Config struct {
@@ -90,6 +112,7 @@ type Config struct {
 	FallbackKey    string
 	EmbeddingModel string
 	DefaultPolicy  Policy
+	Metrics        *obs.Metrics
 }
 
 func New(cfg Config) *Router {
@@ -100,6 +123,8 @@ func New(cfg Config) *Router {
 		},
 		defaultModel:  cfg.CodingModel,
 		defaultPolicy: cfg.DefaultPolicy,
+		metrics:       cfg.Metrics,
+		pricing:       DefaultPricing(),
 	}
 	if cfg.PrimaryKey != "" {
 		r.primary = &gateway{name: "primary", provider: llm.NewOpenAICompatible(llm.Config{
@@ -138,6 +163,7 @@ func (r *Router) Generate(ctx context.Context, req llm.Request) (*llm.Response, 
 // GenerateRoute resolves hints + policy to a backend, delegates, and fails over
 // to the fallback gateway if the primary errors.
 func (r *Router) GenerateRoute(ctx context.Context, req llm.Request, rr RouteRequest, pol Policy) (*llm.Response, ResolvedRoute, error) {
+	start := time.Now()
 	tier, model := r.resolve(rr, pol)
 	req.Model = model
 	route := ResolvedRoute{Tier: tier, Model: model}
@@ -148,17 +174,33 @@ func (r *Router) GenerateRoute(ctx context.Context, req llm.Request, rr RouteReq
 	resp, err := r.primary.provider.Generate(ctx, req)
 	if err == nil {
 		route.Gateway = r.primary.name
+		r.observe(resp, tier, start)
 		return resp, route, nil
 	}
 	if r.fallback != nil {
 		resp, err2 := r.fallback.provider.Generate(ctx, req)
 		if err2 == nil {
 			route.Gateway = r.fallback.name
+			r.observe(resp, tier, start)
 			return resp, route, nil
 		}
 		return nil, route, fmt.Errorf("primary %v; fallback %v", err, err2)
 	}
 	return nil, route, fmt.Errorf("primary %v", err)
+}
+
+func (r *Router) observe(resp *llm.Response, tier Tier, start time.Time) {
+	if r.metrics == nil {
+		return
+	}
+	r.metrics.RouterDecision.Observe(time.Since(start).Seconds())
+	r.metrics.LLMCalls.Inc()
+	if resp.Usage.TotalTokens > 0 {
+		r.metrics.LLMTokens.WithLabelValues("prompt").Add(float64(resp.Usage.PromptTokens))
+		r.metrics.LLMTokens.WithLabelValues("completion").Add(float64(resp.Usage.CompletionTokens))
+		r.metrics.LLMTokens.WithLabelValues("total").Add(float64(resp.Usage.TotalTokens))
+		r.metrics.Cost.Add(r.pricing.Cost(tier, resp.Usage.TotalTokens))
+	}
 }
 
 // Embed implements llm.Provider, delegating to the primary (fallback on error).

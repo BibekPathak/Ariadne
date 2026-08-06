@@ -11,6 +11,7 @@ import (
 
 	"adriane/internal/agents"
 	"adriane/internal/events"
+	"adriane/internal/router"
 	"adriane/internal/store"
 )
 
@@ -25,12 +26,12 @@ type Runner struct {
 	svc     RunnerService
 	repos   *store.EvalRunsRepo
 	results *store.EvalResultsRepo
-	pricing Pricing
+	pricing router.Pricing
 	tier    string // arm: fast | coding | reasoning
 	workdir string // scratch repos
 }
 
-func NewRunner(svc RunnerService, repos *store.EvalRunsRepo, results *store.EvalResultsRepo, pricing Pricing, tier, workdir string) *Runner {
+func NewRunner(svc RunnerService, repos *store.EvalRunsRepo, results *store.EvalResultsRepo, pricing router.Pricing, tier, workdir string) *Runner {
 	if workdir == "" {
 		workdir = filepath.Join(os.TempDir(), "kubeai-eval")
 	}
@@ -91,7 +92,7 @@ func (r *Runner) runTask(ctx context.Context, runID string, task Task) (*store.E
 	runErr := r.svc.Run(ctx, agent.ID)
 
 	evs, _ := r.svc.Events(ctx, agent.ID)
-	metrics := MetricsFromEvents(evs, r.pricing.PricePer1k(r.tier))
+	metrics := MetricsFromEvents(evs, r.pricing.PricePer1k(router.Tier(r.tier)))
 
 	verdict, _ := (CompositeJudge{Expected: task.Expected, WorkDir: scratch}).Score(ctx, Outcome{
 		Task: task.Name, AgentID: agent.ID, Success: runErr == nil, RepoDir: scratch,

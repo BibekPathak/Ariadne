@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"time"
 
 	"adriane/internal/events"
+	"adriane/internal/obs"
 	"adriane/internal/planner"
 	"adriane/internal/scheduler"
 	"adriane/internal/store"
@@ -42,17 +45,18 @@ type AgentService struct {
 	compiler  *workflow.Compiler
 	engine    *workflow.Engine
 	scheduler *scheduler.Scheduler
+	metrics   *obs.Metrics
 	logger    *slog.Logger
 }
 
 func NewAgentService(s *store.Store, bus events.EventBus, templates *TemplateRegistry,
 	p planner.Planner, compiler *workflow.Compiler, engine *workflow.Engine,
-	sched *scheduler.Scheduler, logger *slog.Logger) *AgentService {
+	sched *scheduler.Scheduler, metrics *obs.Metrics, logger *slog.Logger) *AgentService {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &AgentService{store: s, bus: bus, templates: templates, planner: p,
-		compiler: compiler, engine: engine, scheduler: sched, logger: logger}
+		compiler: compiler, engine: engine, scheduler: sched, metrics: metrics, logger: logger}
 }
 
 func (a *AgentService) Create(ctx context.Context, req CreateRequest) (*store.Agent, error) {
@@ -88,6 +92,9 @@ func (a *AgentService) Create(ctx context.Context, req CreateRequest) (*store.Ag
 	_ = a.bus.Publish(ctx, events.New(agent.ID, "", events.AgentCreated, map[string]any{
 		"template": agent.Template, "goal": agent.Goal,
 	}))
+	if a.metrics != nil {
+		a.metrics.AgentsCreated.Inc()
+	}
 	return agent, nil
 }
 
@@ -104,6 +111,7 @@ func (a *AgentService) Run(ctx context.Context, agentID string) error {
 	tpl, _ := a.templates.Get(agent.Template)
 	registry := tasks.NewRegistry()
 
+	planStart := time.Now()
 	plan, err := a.planner.Plan(ctx, planner.PlanRequest{
 		AgentID:            agent.ID,
 		Goal:               agent.Goal,
@@ -111,6 +119,9 @@ func (a *AgentService) Run(ctx context.Context, agentID string) error {
 		PlannerPrompt:      tpl.PlannerPrompt,
 		AvailableTemplates: registry.Names(),
 	})
+	if a.metrics != nil {
+		a.metrics.PlannerTime.Observe(time.Since(planStart).Seconds())
+	}
 	if err != nil {
 		a.fail(ctx, agent, err)
 		return err
@@ -144,17 +155,27 @@ func (a *AgentService) Run(ctx context.Context, agentID string) error {
 	if err := a.store.Agents.UpdateStatus(ctx, agent.ID, StatusCompleted, ""); err != nil {
 		return err
 	}
+	if a.metrics != nil {
+		a.metrics.AgentsCompleted.Inc()
+	}
 	_ = a.bus.Publish(ctx, events.New(agent.ID, "", events.AgentCompleted, map[string]any{}))
 	return nil
 }
 
 func (a *AgentService) fail(ctx context.Context, agent *store.Agent, cause error) {
+	if a.metrics != nil {
+		a.metrics.AgentsFailed.Inc()
+	}
 	_ = a.store.Agents.UpdateStatus(ctx, agent.ID, StatusFailed, cause.Error())
 	_ = a.bus.Publish(ctx, events.New(agent.ID, "", events.AgentFailed, map[string]any{"error": cause.Error()}))
 }
 
 func (a *AgentService) Get(ctx context.Context, id string) (*store.Agent, error) {
 	return a.store.Agents.Get(ctx, id)
+}
+
+func (a *AgentService) List(ctx context.Context) ([]*store.Agent, error) {
+	return a.store.Agents.List(ctx)
 }
 
 func (a *AgentService) Graph(ctx context.Context, id string) ([]*store.Task, error) {
@@ -167,6 +188,19 @@ func (a *AgentService) Events(ctx context.Context, id string) ([]events.Event, e
 
 func (a *AgentService) Artifacts(ctx context.Context, id string) ([]*store.Artifact, error) {
 	return a.store.Artifacts.ListByAgent(ctx, id)
+}
+
+// ArtifactContent returns the file content of a task artifact, scoped to the
+// agent so arbitrary host paths can't be read.
+func (a *AgentService) ArtifactContent(ctx context.Context, agentID, artifactID string) ([]byte, error) {
+	art, err := a.store.Artifacts.Get(ctx, artifactID)
+	if err != nil {
+		return nil, err
+	}
+	if art.AgentID != agentID {
+		return nil, fmt.Errorf("artifact does not belong to agent %s", agentID)
+	}
+	return os.ReadFile(art.Path)
 }
 
 func (a *AgentService) Templates() []string {

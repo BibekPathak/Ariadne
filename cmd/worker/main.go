@@ -54,6 +54,7 @@ func main() {
 	defer nc.Close()
 
 	workerID := "worker-" + randHex(6)
+	stack.Worker.SetWorkerID(workerID)
 	logger.Info("worker online", "id", workerID, "nats", cfg.NATSURL)
 
 	// Heartbeats keep the control plane's dead-worker detection honest.
