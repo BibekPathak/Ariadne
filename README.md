@@ -4,13 +4,13 @@ Kubernetes for AI agents: a distributed execution platform where agents are
 created, planned, scheduled, executed in isolated sandboxes, and replayable
 from an event-sourced log.
 
-This is **Phase 0-9** of a ten-phase roadmap: a distributed platform with
+This is **Phase 0-10** of a ten-phase roadmap: a distributed platform with
 persistent three-tier memory, a ranked/compressed context builder, parallel
 DAG execution, remote workers over NATS with dead-worker reassignment, task
 checkpointing, hardened Docker + **Firecracker microVM** sandboxes, a
-policy-based **model router**, an **evaluation engine**, and **observability
-with a Run Explorer** dashboard — architected so the remaining phase
-(production features) slots in behind existing interfaces.
+policy-based **model router**, an **evaluation engine**, observability with a
+**Run Explorer**, and **production features** — organization isolation, API-key
+auth, quotas, rate limiting, worker autoscaling, and leader election.
 
 ## Architecture
 
@@ -54,14 +54,38 @@ No API key required — the demo provider drives the real tool pipeline inside a
 real Docker sandbox.
 
 ```bash
-docker compose up -d          # postgres + redis + nats
+docker compose up -d          # postgres + redis + nats + prometheus
 make sandbox-image            # kubeai-sandbox:local (docker runtime)
 make firecracker-rootfs       # deploy/firecracker/rootfs.ext4 (firecracker runtime)
-make demo                     # docker runtime, single process
+make demo                     # docker runtime, single process (auth on, dev key)
 make demo-memory              # two runs: proves memory persists across runs
 make demo-distributed         # 3 remote workers over NATS; kills one mid-run
 make demo-firecracker         # the same agent, executing inside microVMs
+make demo-autoscale           # remote + autoscaling: workers spawn and drain
+make eval                     # leaderboard across arms + regression detection
 ```
+
+## Production features (Phase 10)
+
+- **Organizations & API-key auth** (`internal/auth`): `organizations` /
+  `users` / `api_keys` tables; keys are shown once at mint (`POST /auth/keys`,
+  hashed at rest) and authorize `GET /me`, `GET /usage`, `GET /quota`. RBAC
+  roles `admin | owner | reader`. A default org + admin key
+  (`ADMIN_API_KEY`, default `adr-dev-admin`) is seeded idempotently on start.
+- **Isolation**: agents carry `org_id`; every list/detail/event/artifact is
+  org-scoped (admins may cross orgs).
+- **Quotas** (`internal/quota`): per-org concurrent-agent, daily-agent and
+  daily-cost caps enforced at create.
+- **Rate limiting** (`internal/ratelimit`): token bucket per org on agent
+  creation (429 + Retry-After).
+- **Worker autoscaling** (`internal/autoscale`, remote mode): the control
+  plane spawns/terminates `cmd/worker` subprocesses from scheduler depth
+  (`WORKER_AUTOSCALE`, `WORKER_MIN/MAX`, `SCALE_UP_THRESHOLD`,
+  `SCALE_DOWN_IDLE_SEC`, `AUTOSCALE_POLL_MS`). Workers **drain gracefully**:
+  SIGTERM stops new claims but in-flight tasks finish. `make demo-autoscale`.
+- **Leader election** (`internal/leader`): a PostgreSQL advisory lock picks one
+  scheduler leader; standbys serve reads and return 503 on agent creation, and
+  take over when the leader dies (`LEADER_ENABLED`).
 
 ## Sandbox runtimes
 
@@ -247,6 +271,11 @@ internal/runtime       shared worker-stack construction for both binaries
 internal/controlplane  shared control-plane assembly (API + eval)
 internal/eval          evaluation engine: suites, judges, scoring, regression
 internal/obs           Prometheus metrics registry + /metrics
+internal/auth          orgs, API keys, RBAC
+internal/quota         per-org quotas (concurrent/daily/cost)
+internal/ratelimit     token-bucket rate limiter
+internal/autoscale     worker subprocess autoscaling + graceful drain
+internal/leader        Postgres advisory-lock leader election
 dashboard/             Run Explorer (Next.js + React Flow)
 demo/repo              sample project used by the demos
 eval/suites            versioned golden-task suites
@@ -254,5 +283,6 @@ eval/suites            versioned golden-task suites
 
 ## Roadmap
 
-Phase 10 production features: multi-tenancy, RBAC, quotas, rate limiting,
-autoscaling, high availability.
+The ten-phase roadmap is complete. Natural follow-ons: OpenTelemetry spans
+(events → OTel → Tempo/Jaeger), a shared/MinIO artifact store, GPU workers,
+and multi-region control planes.

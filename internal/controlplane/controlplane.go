@@ -10,9 +10,14 @@ import (
 	"log/slog"
 
 	"adriane/internal/agents"
+	"adriane/internal/auth"
+	"adriane/internal/autoscale"
 	"adriane/internal/config"
 	"adriane/internal/events"
+	"adriane/internal/leader"
 	"adriane/internal/planner"
+	"adriane/internal/quota"
+	"adriane/internal/ratelimit"
 	"adriane/internal/runtime"
 	"adriane/internal/scheduler"
 	"adriane/internal/store"
@@ -20,13 +25,18 @@ import (
 )
 
 type ControlPlane struct {
-	Store  *store.Store
-	Bus    events.EventBus
-	Stack  *runtime.Stack
-	Agent  *agents.AgentService
-	Logger *slog.Logger
+	Store   *store.Store
+	Bus     events.EventBus
+	Stack   *runtime.Stack
+	Agent   *agents.AgentService
+	Auth    *auth.Authenticator
+	Quota   *quota.Service
+	Leader  *leader.Election
+	Limiter *ratelimit.Limiter
+	Logger  *slog.Logger
 
 	remoteBus *events.NATSBus
+	workers   *autoscale.Manager
 }
 
 func Build(ctx context.Context, cfg config.Config, logger *slog.Logger) (*ControlPlane, error) {
@@ -64,6 +74,21 @@ func Build(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Contro
 		return nil, err
 	}
 
+	authenticator := auth.New(st.APIKeys, st.Orgs)
+	if cfg.AuthEnabled {
+		if err := authenticator.EnsureSeed(ctx, cfg.AdminAPIKey); err != nil {
+			st.Close()
+			bus.Close()
+			return nil, err
+		}
+	}
+
+	quotaSvc := quota.New(st, quota.Limits{
+		MaxConcurrentAgents: cfg.OrgMaxConcurrentAgents,
+		MaxDailyAgents:      cfg.OrgMaxDailyAgents,
+		DailyCostCap:        cfg.OrgDailyCostCap,
+	})
+
 	var plannerIf planner.Planner
 	if cfg.RouterPrimaryKey == "" {
 		plannerIf = planner.StaticPlanner{}
@@ -85,14 +110,50 @@ func Build(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Contro
 	sched := scheduler.NewScheduler(bus, workerIf, logger, cfg.EngineConcurrency, stack.Metrics)
 	compiler := workflow.NewCompiler(stack.TaskTemplates)
 	engine := workflow.NewEngine(st.Tasks, bus, logger, cfg.EngineConcurrency, stack.Metrics)
-	agentService := agents.NewAgentService(st, bus, agents.NewTemplateRegistry(), plannerIf, compiler, engine, sched, stack.Metrics, logger)
+	agentService := agents.NewAgentService(st, bus, agents.NewTemplateRegistry(), plannerIf, compiler, engine, sched, quotaSvc, stack.Metrics, logger)
 
-	return &ControlPlane{
-		Store: st, Bus: bus, Stack: stack, Agent: agentService, Logger: logger, remoteBus: remoteBus,
-	}, nil
+	cp := &ControlPlane{
+		Store: st, Bus: bus, Stack: stack, Agent: agentService,
+		Auth: authenticator, Quota: quotaSvc, Limiter: ratelimit.New(cfg.RateLimitPerMin),
+		Logger: logger, remoteBus: remoteBus,
+	}
+
+	// Leadership: exactly one replica runs agent executions and the autoscaler.
+	if cfg.LeaderEnabled {
+		cp.Leader = leader.New(st.Pool(), logger)
+		var workers *autoscale.Manager
+		if cfg.WorkerAutoscale && cfg.WorkerMode == "remote" {
+			workers = autoscale.NewManager(cfg.WorkerBinary, logger)
+			cp.workers = workers
+		}
+		go cp.Leader.Run(ctx, func(ctx context.Context) {
+			if workers != nil {
+				go autoscale.NewAutoscalerPoll(workers, sched.Depth,
+					cfg.WorkerMin, cfg.WorkerMax, cfg.ScaleUpThreshold, cfg.ScaleDownIdle,
+					cfg.AutoscalerPoll, logger).Run(ctx)
+			}
+		})
+	} else {
+		logger.Warn("leader election disabled; assume this instance is leader")
+	}
+
+	return cp, nil
+}
+
+func (c *ControlPlane) IsLeader() bool {
+	if c.Leader == nil {
+		return true
+	}
+	return c.Leader.IsLeader()
 }
 
 func (c *ControlPlane) Close() {
+	if c.Leader != nil {
+		c.Leader.Close()
+	}
+	if c.workers != nil {
+		c.workers.StopAll()
+	}
 	if c.remoteBus != nil {
 		_ = c.remoteBus.Close()
 	}

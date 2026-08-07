@@ -7,9 +7,11 @@ import (
 	"os"
 	"time"
 
+	"adriane/internal/auth"
 	"adriane/internal/events"
 	"adriane/internal/obs"
 	"adriane/internal/planner"
+	"adriane/internal/quota"
 	"adriane/internal/scheduler"
 	"adriane/internal/store"
 	"adriane/internal/tasks"
@@ -45,21 +47,26 @@ type AgentService struct {
 	compiler  *workflow.Compiler
 	engine    *workflow.Engine
 	scheduler *scheduler.Scheduler
+	quota     *quota.Service
 	metrics   *obs.Metrics
 	logger    *slog.Logger
 }
 
 func NewAgentService(s *store.Store, bus events.EventBus, templates *TemplateRegistry,
 	p planner.Planner, compiler *workflow.Compiler, engine *workflow.Engine,
-	sched *scheduler.Scheduler, metrics *obs.Metrics, logger *slog.Logger) *AgentService {
+	sched *scheduler.Scheduler, quotaSvc *quota.Service, metrics *obs.Metrics, logger *slog.Logger) *AgentService {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &AgentService{store: s, bus: bus, templates: templates, planner: p,
-		compiler: compiler, engine: engine, scheduler: sched, metrics: metrics, logger: logger}
+		compiler: compiler, engine: engine, scheduler: sched, quota: quotaSvc, metrics: metrics, logger: logger}
 }
 
 func (a *AgentService) Create(ctx context.Context, req CreateRequest) (*store.Agent, error) {
+	principal := auth.PrincipalFromContext(ctx)
+	if !principal.CanManage() {
+		return nil, fmt.Errorf("forbidden: role %s cannot create agents", principal.Role)
+	}
 	tpl, ok := a.templates.Get(req.Template)
 	if !ok {
 		return nil, fmt.Errorf("unknown agent template %q (available: %v)", req.Template, a.templates.Names())
@@ -70,9 +77,15 @@ func (a *AgentService) Create(ctx context.Context, req CreateRequest) (*store.Ag
 	if req.RepoURL == "" && req.RepoPath == "" {
 		return nil, fmt.Errorf("repo_url or repo_path is required")
 	}
+	if a.quota != nil {
+		if err := a.quota.CheckCreate(ctx, principal.OrgID); err != nil {
+			return nil, err
+		}
+	}
 
 	agent := &store.Agent{
 		ID:       newID(),
+		OrgID:    principal.OrgID,
 		Template: req.Template,
 		Goal:     req.Goal,
 		RepoURL:  req.RepoURL,
@@ -175,7 +188,27 @@ func (a *AgentService) Get(ctx context.Context, id string) (*store.Agent, error)
 }
 
 func (a *AgentService) List(ctx context.Context) ([]*store.Agent, error) {
-	return a.store.Agents.List(ctx)
+	principal := auth.PrincipalFromContext(ctx)
+	if principal.Role == auth.RoleAdmin {
+		return a.store.Agents.List(ctx)
+	}
+	return a.store.Agents.ListByOrg(ctx, principal.OrgID)
+}
+
+func (a *AgentService) Usage(ctx context.Context) (*quota.Usage, error) {
+	if a.quota == nil {
+		return &quota.Usage{}, nil
+	}
+	return a.quota.Usage(ctx, auth.PrincipalFromContext(ctx).OrgID)
+}
+
+func (a *AgentService) OrgID(ctx context.Context) string {
+	return auth.PrincipalFromContext(ctx).OrgID
+}
+
+// ListKeys returns the API keys for the caller's org.
+func (a *AgentService) ListKeys(ctx context.Context, p *auth.Principal) ([]*store.APIKey, error) {
+	return a.store.APIKeys.ListByOrg(ctx, p.OrgID)
 }
 
 func (a *AgentService) Graph(ctx context.Context, id string) ([]*store.Task, error) {

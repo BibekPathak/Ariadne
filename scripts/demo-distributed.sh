@@ -3,6 +3,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 BASE=http://localhost:8080
+ADMIN_KEY=${ADMIN_API_KEY:-adr-dev-admin}
+curl() { command curl -s -H "Authorization: Bearer $ADMIN_KEY" "$@"; }
+
 
 echo "==> building binaries"
 go build -o bin/kubeai ./cmd/api-gateway

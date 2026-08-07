@@ -19,7 +19,7 @@ type pool interface {
 func scanAgent(row pgx.Row) (*Agent, error) {
 	var a Agent
 	var meta []byte
-	err := row.Scan(&a.ID, &a.Template, &a.Goal, &a.RepoURL, &a.RepoPath,
+	err := row.Scan(&a.ID, &a.OrgID, &a.Template, &a.Goal, &a.RepoURL, &a.RepoPath,
 		&a.Status, &a.Error, &meta, &a.CreatedAt, &a.UpdatedAt)
 	if err == pgx.ErrNoRows {
 		return nil, ErrNotFound

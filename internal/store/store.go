@@ -20,6 +20,9 @@ type Store struct {
 	Checkpoints *CheckpointRepo
 	EvalRuns    *EvalRunsRepo
 	EvalResults *EvalResultsRepo
+	Orgs        *OrgsRepo
+	Users       *UsersRepo
+	APIKeys     *APIKeysRepo
 }
 
 func New(ctx context.Context, databaseURL string) (*Store, error) {
@@ -39,7 +42,13 @@ func New(ctx context.Context, databaseURL string) (*Store, error) {
 	s.Checkpoints = &CheckpointRepo{pool: pool}
 	s.EvalRuns = &EvalRunsRepo{pool: pool}
 	s.EvalResults = &EvalResultsRepo{pool: pool}
+	s.Orgs = &OrgsRepo{pool: pool}
+	s.Users = &UsersRepo{pool: pool}
+	s.APIKeys = &APIKeysRepo{pool: pool}
 	return s, nil
 }
 
 func (s *Store) Close() { s.pool.Close() }
+
+// Pool exposes the underlying connection pool (used for leader election).
+func (s *Store) Pool() *pgxpool.Pool { return s.pool }

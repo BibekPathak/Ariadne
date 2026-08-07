@@ -34,6 +34,26 @@ func (r *EventsRepo) ListByAgent(ctx context.Context, agentID string) ([]events.
 	return scanEvents(rows)
 }
 
+// TokensByOrgSince sums total_tokens from llm_called events for an org since
+// a timestamp, used for usage and cost-quota accounting.
+func (r *EventsRepo) TokensByOrgSince(ctx context.Context, orgID string, since time.Time) (int, error) {
+	var n int
+	rows, err := r.pool.Query(ctx,
+		`SELECT COALESCE(SUM((e.payload->>'total_tokens')::int), 0)
+		 FROM events e JOIN agents a ON a.id = e.agent_id
+		 WHERE a.org_id=$1 AND e.type='llm_called' AND e.ts >= $2`, orgID, since)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	if rows.Next() {
+		if err := rows.Scan(&n); err != nil {
+			return 0, err
+		}
+	}
+	return n, rows.Err()
+}
+
 func (r *EventsRepo) StreamAfterSeq(ctx context.Context, agentID string, afterSeq int64) ([]events.Event, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT seq, agent_id, task_id, type, payload, ts FROM events WHERE agent_id=$1 AND seq>$2 ORDER BY seq`,

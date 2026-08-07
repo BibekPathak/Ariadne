@@ -1,4 +1,4 @@
-.PHONY: run test demo demo-memory demo-distributed demo-firecracker eval dashboard migrate lint tidy build sandbox-image firecracker-rootfs
+.PHONY: run test demo demo-memory demo-distributed demo-firecracker demo-autoscale eval dashboard migrate lint tidy build sandbox-image firecracker-rootfs
 
 build:
 	go build -o bin/kubeai ./cmd/api-gateway
@@ -37,6 +37,9 @@ demo-distributed: up build
 
 demo-firecracker: build
 	./scripts/demo-firecracker.sh
+
+demo-autoscale: build
+	./scripts/demo-autoscale.sh
 
 eval: up build
 	./scripts/demo-eval.sh

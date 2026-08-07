@@ -36,12 +36,24 @@ func main() {
 	}
 	defer cp.Close()
 
+	api := &api{
+		svc:         cp.Agent,
+		bus:         cp.Bus,
+		logger:      logger,
+		runTimeout:  cfg.Timeout,
+		metrics:     cp.Stack.Metrics.Handler(),
+		auth:        cp.Auth,
+		authEnabled: cfg.AuthEnabled,
+		limiter:     cp.Limiter,
+		leader:      cp.IsLeader,
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           routes(cp.Agent, cp.Bus, cfg.Timeout, logger, cp.Stack.Metrics.Handler()),
+		Handler:           routes(api),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	logger.Info("control plane listening", "addr", cfg.HTTPAddr, "worker_mode", cfg.WorkerMode)
+	logger.Info("control plane listening", "addr", cfg.HTTPAddr, "worker_mode", cfg.WorkerMode, "auth", cfg.AuthEnabled)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("server error", "err", err)
 		os.Exit(1)

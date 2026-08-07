@@ -6,31 +6,44 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"adriane/internal/agents"
+	"adriane/internal/auth"
 	"adriane/internal/events"
+	"adriane/internal/ratelimit"
+	"adriane/internal/store"
 )
 
 type api struct {
-	svc        *agents.AgentService
-	bus        events.EventBus
-	logger     *slog.Logger
-	runTimeout time.Duration
-	metrics    http.Handler
+	svc         *agents.AgentService
+	bus         events.EventBus
+	logger      *slog.Logger
+	runTimeout  time.Duration
+	metrics     http.Handler
+	auth        *auth.Authenticator
+	authEnabled bool
+	limiter     *ratelimit.Limiter
+	leader      func() bool
 }
 
-func routes(svc *agents.AgentService, bus events.EventBus, runTimeout time.Duration, logger *slog.Logger, metrics http.Handler) http.Handler {
-	a := &api{svc: svc, bus: bus, logger: logger, runTimeout: runTimeout, metrics: metrics}
+func routes(a *api) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	if metrics != nil {
-		mux.Handle("GET /metrics", metrics)
+	if a.metrics != nil {
+		mux.Handle("GET /metrics", a.metrics)
 	}
 	mux.HandleFunc("GET /templates", a.listTemplates)
+	mux.HandleFunc("GET /me", a.me)
+	mux.HandleFunc("GET /usage", a.usage)
+	mux.HandleFunc("GET /quota", a.usage)
+	mux.HandleFunc("GET /auth/keys", a.listKeys)
+	mux.HandleFunc("POST /auth/keys", a.mintKey)
+
 	mux.HandleFunc("GET /agents", a.listAgents)
 	mux.HandleFunc("POST /agents", a.createAgent)
 	mux.HandleFunc("GET /agents/{id}", a.getAgent)
@@ -41,7 +54,26 @@ func routes(svc *agents.AgentService, bus events.EventBus, runTimeout time.Durat
 	mux.HandleFunc("GET /agents/{id}/artifacts", a.getArtifacts)
 	mux.HandleFunc("GET /agents/{id}/artifacts/{artifactID}/content", a.getArtifactContent)
 
-	return corsMiddleware(logMiddleware(mux, logger))
+	return corsMiddleware(a.authMiddleware(logMiddleware(mux, a.logger)))
+}
+
+// authMiddleware resolves the bearer API key into a principal (or a dev
+// principal when auth is disabled).
+func (a *api) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !a.authEnabled {
+			next.ServeHTTP(w, r.WithContext(auth.WithPrincipal(r.Context(),
+				&auth.Principal{OrgID: "default", Role: auth.RoleAdmin})))
+			return
+		}
+		bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		principal, err := a.auth.Authenticate(r.Context(), bearer)
+		if err != nil {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid API key"})
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(auth.WithPrincipal(r.Context(), principal)))
+	})
 }
 
 // corsMiddleware permits the dashboard (browser origin) to call the API
@@ -50,7 +82,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -71,6 +103,62 @@ func (a *api) listTemplates(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"templates": a.svc.Templates()})
 }
 
+func (a *api) me(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFromContext(r.Context())
+	writeJSON(w, http.StatusOK, map[string]any{
+		"org": p.OrgID, "role": p.Role, "key": p.KeyName,
+	})
+}
+
+func (a *api) usage(w http.ResponseWriter, r *http.Request) {
+	u, err := a.svc.Usage(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
+}
+
+func (a *api) listKeys(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFromContext(r.Context())
+	if !p.CanManage() {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	keys, err := a.svc.ListKeys(r.Context(), p)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"keys": keys})
+}
+
+func (a *api) mintKey(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFromContext(r.Context())
+	if !p.CanManage() {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	var req struct {
+		Name  string `json:"name"`
+		Role  string `json:"role"`
+		OrgID string `json:"org_id"` // admin-only: mint for another org
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	var err error
+	var raw string
+	if p.Role == auth.RoleAdmin && req.OrgID != "" && req.OrgID != p.OrgID {
+		raw, err = a.auth.MintKeyForOrg(r.Context(), req.OrgID, req.Name, auth.Role(req.Role), true)
+	} else {
+		raw, err = a.auth.MintKey(r.Context(), p.OrgID, req.Name, auth.Role(req.Role))
+	}
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"key": raw, "note": "shown once; store it safely"})
+}
+
 func (a *api) listAgents(w http.ResponseWriter, r *http.Request) {
 	agents, err := a.svc.List(r.Context())
 	if err != nil {
@@ -81,6 +169,16 @@ func (a *api) listAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) createAgent(w http.ResponseWriter, r *http.Request) {
+	p := auth.PrincipalFromContext(r.Context())
+	if a.leader != nil && !a.leader() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "control plane standby; another replica is the scheduler leader"})
+		return
+	}
+	if a.limiter != nil && !a.limiter.Allow(p.OrgID) {
+		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(a.limiter.RetryAfter(p.OrgID).Seconds())))
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
+		return
+	}
 	var req agents.CreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body: " + err.Error()})
@@ -111,6 +209,10 @@ func (a *api) getAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
+	if !a.canAccess(r, agent) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
 	writeJSON(w, http.StatusOK, agent)
 }
 
@@ -120,6 +222,10 @@ func (a *api) rerunAgent(w http.ResponseWriter, r *http.Request) {
 	agent, err := a.svc.Get(r.Context(), r.PathValue("id"))
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	if !a.canAccess(r, agent) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
 	if agent.Status == agents.StatusRunning {
@@ -137,6 +243,15 @@ func (a *api) rerunAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) getGraph(w http.ResponseWriter, r *http.Request) {
+	agent, err := a.svc.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	if !a.canAccess(r, agent) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
 	tasks, err := a.svc.Graph(r.Context(), r.PathValue("id"))
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -146,6 +261,15 @@ func (a *api) getGraph(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) getEvents(w http.ResponseWriter, r *http.Request) {
+	agent, err := a.svc.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	if !a.canAccess(r, agent) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
 	evs, err := a.svc.Events(r.Context(), r.PathValue("id"))
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -155,6 +279,15 @@ func (a *api) getEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) getArtifacts(w http.ResponseWriter, r *http.Request) {
+	agent, err := a.svc.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	if !a.canAccess(r, agent) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
 	arts, err := a.svc.Artifacts(r.Context(), r.PathValue("id"))
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -164,6 +297,15 @@ func (a *api) getArtifacts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) getArtifactContent(w http.ResponseWriter, r *http.Request) {
+	agent, err := a.svc.Get(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	if !a.canAccess(r, agent) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
 	data, err := a.svc.ArtifactContent(r.Context(), r.PathValue("id"), r.PathValue("artifactID"))
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -173,9 +315,23 @@ func (a *api) getArtifactContent(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
+// canAccess checks org ownership (admins may cross orgs).
+func (a *api) canAccess(r *http.Request, agent *store.Agent) bool {
+	p := auth.PrincipalFromContext(r.Context())
+	if p.Role == auth.RoleAdmin {
+		return true
+	}
+	return p.OrgID == agent.OrgID
+}
+
 // streamEvents replays the full event log then tails live updates via SSE.
 func (a *api) streamEvents(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
+	agent, err := a.svc.Get(r.Context(), agentID)
+	if err != nil || !a.canAccess(r, agent) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming unsupported"})

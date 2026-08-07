@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 
 	"adriane/internal/events"
 	"adriane/internal/obs"
@@ -46,6 +47,7 @@ type Scheduler struct {
 	mu        sync.Mutex
 	workers   map[string]*workerRecord
 	currentID string
+	depth     atomic.Int64
 }
 
 func NewScheduler(bus events.EventBus, worker Worker, logger *slog.Logger, size int, metrics *obs.Metrics) *Scheduler {
@@ -66,8 +68,13 @@ func (s *Scheduler) registerWorker(id string) {
 	s.workers[id] = &workerRecord{id: id, state: WorkerRegistered}
 }
 
+// Depth is the number of tasks currently in execution (used by the autoscaler).
+func (s *Scheduler) Depth() int64 { return s.depth.Load() }
+
 // Execute implements workflow.TaskExecutor.
 func (s *Scheduler) Execute(ctx context.Context, node *workflow.Node) (map[string]any, error) {
+	s.depth.Add(1)
+	defer s.depth.Add(-1)
 	if s.metrics != nil {
 		s.metrics.QueueDepth.Inc()
 		defer s.metrics.QueueDepth.Dec()
